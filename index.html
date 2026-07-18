@@ -360,6 +360,7 @@
     .logo-mark{width:52px; height:52px;}
     .settings-row, form.trip-form{flex-direction:column; align-items:stretch;}
     select, input[type=date], input[type=text]{min-width:0; width:100%;}
+    input[type=file]{width:100%; box-sizing:border-box;}
     table, thead, tbody, th, td, tr{display:block;}
     thead{display:none;}
     tr{border-bottom:1px solid var(--gold-line); padding:8px 0;}
@@ -536,9 +537,9 @@
       </div>
       <div class="field image-field" style="flex:1; min-width:220px;">
         <label for="tripImage">参考图片（可选，可多张）</label>
-        <div style="display:flex; gap:6px; align-items:center;">
-          <input type="file" id="tripImage" accept="image/*" multiple style="flex:1; min-width:0;">
-          <button type="button" class="btn ghost" id="cameraBtn" title="拍照" style="white-space:nowrap; padding:8px 12px;">📷 拍照</button>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          <input type="file" id="tripImage" accept="image/*" multiple style="flex:1 1 140px; min-width:0; max-width:100%;">
+          <button type="button" class="btn ghost" id="cameraBtn" title="拍照" style="white-space:nowrap; padding:8px 12px; flex-shrink:0;">📷 拍照</button>
           <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;">
         </div>
         <div class="image-thumb-list" id="imageThumbList"></div>
