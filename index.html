@@ -536,7 +536,11 @@
       </div>
       <div class="field image-field" style="flex:1; min-width:220px;">
         <label for="tripImage">参考图片（可选，可多张）</label>
-        <input type="file" id="tripImage" accept="image/*" multiple>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input type="file" id="tripImage" accept="image/*" multiple style="flex:1; min-width:0;">
+          <button type="button" class="btn ghost" id="cameraBtn" title="拍照" style="white-space:nowrap; padding:8px 12px;">📷 拍照</button>
+          <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;">
+        </div>
         <div class="image-thumb-list" id="imageThumbList"></div>
       </div>
       <div class="field">
@@ -709,6 +713,8 @@
   const yearCardsEl = document.getElementById('yearCards');
   const tripTableWrap = document.getElementById('tripTableWrap');
   const tripImageInput = document.getElementById('tripImage');
+  const cameraInput = document.getElementById('cameraInput');
+  const cameraBtn = document.getElementById('cameraBtn');
   const transportModeEl = document.getElementById('transportMode');
   const routeDetailEl = document.getElementById('routeDetail');
   const imageThumbList = document.getElementById('imageThumbList');
@@ -848,9 +854,8 @@
     });
   }
 
-  tripImageInput.addEventListener('change', async ()=>{
-    const files = Array.from(tripImageInput.files || []);
-    tripImageInput.value = ''; // clear so picking the same file again still fires 'change'
+  async function handleIncomingImageFiles(fileList){
+    const files = Array.from(fileList || []);
     for(const file of files){
       if(!file.type.startsWith('image/')) continue;
       try{
@@ -861,6 +866,20 @@
       }
     }
     renderImageThumbList();
+  }
+
+  tripImageInput.addEventListener('change', async ()=>{
+    await handleIncomingImageFiles(tripImageInput.files);
+    tripImageInput.value = ''; // clear so picking the same file again still fires 'change'
+  });
+
+  cameraBtn.addEventListener('click', ()=>{
+    cameraInput.click();
+  });
+
+  cameraInput.addEventListener('change', async ()=>{
+    await handleIncomingImageFiles(cameraInput.files);
+    cameraInput.value = ''; // clear so taking another photo still fires 'change'
   });
 
   function renderImageThumbList(){
@@ -1887,7 +1906,7 @@
   if('serviceWorker' in navigator){
     window.addEventListener('load', ()=>{
       navigator.serviceWorker.register('sw.js').catch((e)=>{
-        console.warn('[my-ledger] service worker registration skipped:', e);
+        console.warn('[border-day-ledger] service worker registration skipped:', e);
       });
     });
   }
