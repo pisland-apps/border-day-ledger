@@ -355,6 +355,40 @@
   .print-table td{padding:6px 8px; border-bottom:1px solid var(--gold-line);}
   .print-footer{margin-top:22px; font-size:10.5px; color:var(--grey-text); font-family:var(--mono); line-height:1.6;}
 
+  /* app-lock overlay */
+  .lock-overlay{
+    display:none; position:fixed; inset:0; z-index:2000;
+    background:var(--paper);
+    align-items:center; justify-content:center; padding:24px;
+  }
+  .lock-overlay.open{display:flex;}
+  .lock-box{
+    width:100%; max-width:380px; background:#fff;
+    border:1px solid var(--gold-line); border-radius:6px;
+    box-shadow:var(--card-shadow); padding:28px 26px;
+  }
+  .lock-title{font-family:var(--serif); font-size:20px; margin:0 0 8px; color:var(--ink);}
+  .lock-sub{font-size:12.5px; color:var(--ink-soft); line-height:1.6; margin:0 0 16px;}
+  .lock-box input[type=password]{
+    width:100%; font-family:var(--mono); font-size:14px; padding:10px 12px;
+    border:1px solid var(--gold-line); border-radius:3px; background:var(--paper);
+    color:var(--ink); margin-bottom:10px; box-sizing:border-box;
+  }
+  .lock-box input[type=password]:focus{outline:2px solid var(--checkpoint-soft); outline-offset:1px;}
+  .lock-error{font-size:12px; color:var(--stamp); min-height:16px; margin-bottom:8px;}
+  .lock-actions{display:flex; gap:10px; justify-content:flex-end;}
+  .lock-footnote{margin-top:14px; font-size:11.5px; text-align:center;}
+  .lock-footnote a{color:var(--ink-soft); cursor:pointer; text-decoration:underline;}
+  .lock-footnote a:hover{color:var(--stamp);}
+
+  /* toggle switch (export encryption) */
+  .switch{position:relative; display:inline-block; width:38px; height:22px; flex-shrink:0;}
+  .switch input{opacity:0; width:0; height:0; position:absolute;}
+  .switch-slider{position:absolute; inset:0; background:var(--gold-line); transition:0.2s; border-radius:22px; cursor:pointer;}
+  .switch-slider::before{content:""; position:absolute; height:16px; width:16px; left:3px; top:3px; background:#fff; transition:0.2s; border-radius:50%; box-shadow:0 1px 2px rgba(0,0,0,0.25);}
+  .switch input:checked + .switch-slider{background:var(--checkpoint);}
+  .switch input:checked + .switch-slider::before{transform:translateX(16px);}
+
   @media (max-width:600px){
     header{flex-direction:column; align-items:flex-start; text-align:left;}
     .logo-mark{width:52px; height:52px;}
@@ -370,6 +404,21 @@
 </style>
 </head>
 <body>
+
+<div class="lock-overlay" id="lockOverlay">
+  <div class="lock-box">
+    <div class="lock-title" id="lockTitle">🔒 输入密码解锁</div>
+    <div class="lock-sub" id="lockSubtitle"></div>
+    <input type="password" id="lockPass1" autocomplete="off" placeholder="密码">
+    <input type="password" id="lockPass2" autocomplete="off" placeholder="确认密码" style="display:none;">
+    <div class="lock-error" id="lockError"></div>
+    <div class="lock-actions">
+      <button type="button" class="btn ghost" id="lockCancelBtn" style="display:none;">取消</button>
+      <button type="button" class="btn" id="lockSubmitBtn">解锁</button>
+    </div>
+    <div class="lock-footnote" id="lockFootnote"></div>
+  </div>
+</div>
 
 <header>
   <svg class="logo-mark" viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
@@ -435,9 +484,19 @@
           <option value="MY">马来西亚</option>
         </select>
       </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn ghost" id="changePassBtn">更改密码</button>
+          <button type="button" class="btn ghost" id="lockNowBtn">🔒 立即锁定</button>
+        </div>
+      </div>
       <div class="save-status" id="saveStatus"></div>
     </div>
     <div id="storageModeNote" style="font-size:11.5px; color:var(--grey-text); margin-top:10px; display:none;"></div>
+    <div style="font-size:11.5px; color:var(--grey-text); margin-top:10px;">
+      🔒 本工具所有数据均使用密码派生的密钥加密保存（PBKDF2 + AES-GCM）。密码仅保存在本次会话的内存中，不会被存储。
+    </div>
   </section>
 
   <section class="panel">
@@ -458,6 +517,17 @@
         </div>
         <input type="file" id="importFile" accept="application/json,.json" style="display:none;">
         <input type="file" id="importZipFile" accept=".zip,application/zip" style="display:none;">
+      </div>
+      <div class="field" style="min-width:200px;">
+        <label for="exportEncryptToggle">导出加密</label>
+        <div style="display:flex; align-items:center; gap:8px; padding-top:6px;">
+          <label class="switch">
+            <input type="checkbox" id="exportEncryptToggle" checked>
+            <span class="switch-slider"></span>
+          </label>
+          <span style="font-size:12px; color:var(--grey-text);">开启后导出文件需设置备份密码</span>
+        </div>
+        <div style="font-size:11px; color:var(--stamp); margin-top:2px;">明文备份不含密码保护，请妥善保管</div>
       </div>
       <div class="field">
         <label for="printYearSelect">选择年份</label>
@@ -672,7 +742,10 @@
     }
   }
 
-  const appStorage = {
+  // raw, UNENCRYPTED key/value access to whichever backend is active. Only the
+  // crypto/lock module below should ever touch this directly; every other
+  // part of the app goes through `appStorage`, which transparently encrypts.
+  const rawStorage = {
     async get(key, shared){
       if(HAS_CLAUDE_STORAGE) return window.storage.get(key, shared);
       if(idbDB){
@@ -699,6 +772,188 @@
       }
       localStorage.removeItem(key);
       return { key, deleted:true, shared: !!shared };
+    }
+  };
+
+  async function wipeAllLocalData(){
+    if(HAS_CLAUDE_STORAGE){
+      try{
+        const listing = await window.storage.list('border-ledger:', false);
+        const keys = (listing && listing.keys) || [];
+        for(const k of keys){ try{ await window.storage.delete(k, false); }catch(e){} }
+      }catch(e){ console.error('[border-ledger] wipe (claude storage) failed', e); }
+    } else if(idbDB){
+      await new Promise((resolve)=>{
+        try{
+          const tx = idbDB.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).clear();
+          tx.oncomplete = ()=>resolve();
+          tx.onerror = ()=>resolve();
+        }catch(e){ resolve(); }
+      });
+    } else {
+      Object.keys(localStorage).filter(k=>k.startsWith('border-ledger:')).forEach(k=>localStorage.removeItem(k));
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // App-lock: PBKDF2 (SHA-256) key derivation + AES-GCM encryption via
+  // Web Crypto. Every value written through `appStorage` below (trip
+  // records, settings, and every stored image) is stored as an encrypted
+  // {iv, ct} envelope. The derived key only ever lives in memory for the
+  // current session — nothing about the passcode itself is ever stored.
+  // ---------------------------------------------------------------------
+  const PBKDF2_ITERATIONS = 210000;
+  const LOCK_META_KEY = 'border-ledger:lock-meta';
+  const LOCK_CHECK_PLAINTEXT = 'border-ledger-unlock-check-v1';
+  let sessionKey = null; // CryptoKey, in-memory only
+
+  function randomBytes(n){ const a = new Uint8Array(n); crypto.getRandomValues(a); return a; }
+  function bufToB64(buf){
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    for(let i=0; i<bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function b64ToBuf(b64){
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for(let i=0; i<bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr.buffer;
+  }
+
+  async function deriveKey(passcode, saltBytes, iterations){
+    const enc = new TextEncoder();
+    const baseKey = await crypto.subtle.importKey('raw', enc.encode(passcode), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name:'PBKDF2', salt: saltBytes, iterations: iterations || PBKDF2_ITERATIONS, hash:'SHA-256' },
+      baseKey,
+      { name:'AES-GCM', length:256 },
+      false,
+      ['encrypt','decrypt']
+    );
+  }
+
+  async function aesEncryptString(key, plaintext){
+    const iv = randomBytes(12);
+    const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
+    return { iv: bufToB64(iv), ct: bufToB64(ct) };
+  }
+  async function aesDecryptToString(key, envelope){
+    const iv = new Uint8Array(b64ToBuf(envelope.iv));
+    const ptBuf = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, b64ToBuf(envelope.ct));
+    return new TextDecoder().decode(ptBuf);
+  }
+
+  async function getLockMeta(){
+    const r = await rawStorage.get(LOCK_META_KEY, false).catch(()=>null);
+    if(!r) return null;
+    try{ return JSON.parse(r.value); }catch(e){ return null; }
+  }
+  async function saveLockMeta(meta){
+    await rawStorage.set(LOCK_META_KEY, JSON.stringify(meta), false);
+  }
+
+  // Reads every existing record through `oldKey` (or as plaintext if oldKey
+  // is null, for the very first setup) and rewrites it encrypted under
+  // `newKey`. Used both for first-time setup (migrating any pre-existing
+  // unencrypted data) and for changing the passcode later.
+  async function reencryptAllData(oldKey, newKey){
+    async function readPlain(rec){
+      if(!rec) return null;
+      if(!oldKey) return rec.value;
+      const envelope = JSON.parse(rec.value);
+      return aesDecryptToString(oldKey, envelope);
+    }
+    async function writeEncrypted(k, plaintext){
+      const env = await aesEncryptString(newKey, plaintext);
+      await rawStorage.set(k, JSON.stringify(env), false);
+    }
+
+    const tripsRec = await rawStorage.get(STORAGE_TRIPS_KEY, false).catch(()=>null);
+    const settingsRec = await rawStorage.get(STORAGE_SETTINGS_KEY, false).catch(()=>null);
+    const tripsPlain = await readPlain(tripsRec);
+    const settingsPlain = await readPlain(settingsRec);
+
+    let tripsArr = [];
+    if(tripsPlain){ try{ tripsArr = JSON.parse(tripsPlain) || []; }catch(e){ tripsArr = []; } }
+
+    if(tripsPlain !== null) await writeEncrypted(STORAGE_TRIPS_KEY, tripsPlain);
+    if(settingsPlain !== null) await writeEncrypted(STORAGE_SETTINGS_KEY, settingsPlain);
+
+    for(const t of tripsArr){
+      const ids = t.imageIds || (t.hasImage ? ['legacy'] : []);
+      for(const imgId of ids){
+        const k = imageStorageKey(t.id, imgId);
+        const rec = await rawStorage.get(k, false).catch(()=>null);
+        const plain = await readPlain(rec);
+        if(plain !== null) await writeEncrypted(k, plain);
+      }
+    }
+  }
+
+  async function setupPasscode(passcode){
+    const salt = randomBytes(16);
+    const newKey = await deriveKey(passcode, salt, PBKDF2_ITERATIONS);
+    await reencryptAllData(null, newKey); // migrate any pre-existing plaintext data
+    const check = await aesEncryptString(newKey, LOCK_CHECK_PLAINTEXT);
+    await saveLockMeta({ v:1, salt: bufToB64(salt), iterations: PBKDF2_ITERATIONS, check });
+    sessionKey = newKey;
+  }
+
+  async function tryUnlock(passcode){
+    const meta = await getLockMeta();
+    if(!meta) return false;
+    try{
+      const salt = new Uint8Array(b64ToBuf(meta.salt));
+      const key = await deriveKey(passcode, salt, meta.iterations || PBKDF2_ITERATIONS);
+      const pt = await aesDecryptToString(key, meta.check);
+      if(pt !== LOCK_CHECK_PLAINTEXT) return false;
+      sessionKey = key;
+      return true;
+    }catch(e){ return false; }
+  }
+
+  async function changePasscode(oldPass, newPass){
+    const meta = await getLockMeta();
+    if(!meta) throw new Error('no-lock-meta');
+    const oldSalt = new Uint8Array(b64ToBuf(meta.salt));
+    const oldKey = await deriveKey(oldPass, oldSalt, meta.iterations || PBKDF2_ITERATIONS);
+    let pt;
+    try{ pt = await aesDecryptToString(oldKey, meta.check); }catch(e){ pt = null; }
+    if(pt !== LOCK_CHECK_PLAINTEXT) throw new Error('wrong-old-passcode');
+
+    const newSalt = randomBytes(16);
+    const newKey = await deriveKey(newPass, newSalt, PBKDF2_ITERATIONS);
+    await reencryptAllData(oldKey, newKey);
+    const check = await aesEncryptString(newKey, LOCK_CHECK_PLAINTEXT);
+    await saveLockMeta({ v:1, salt: bufToB64(newSalt), iterations: PBKDF2_ITERATIONS, check });
+    sessionKey = newKey;
+  }
+
+  // transparent encrypt-before-write / decrypt-after-read wrapper — every
+  // other part of the app reads/writes through this, unaware of the crypto
+  const appStorage = {
+    async get(key, shared){
+      const r = await rawStorage.get(key, shared);
+      if(!r) return null;
+      if(!sessionKey) throw new Error('app is locked');
+      let envelope;
+      try{ envelope = JSON.parse(r.value); }
+      catch(e){ throw new Error('corrupt or unencrypted record for ' + key); }
+      if(!envelope || typeof envelope.iv !== 'string' || typeof envelope.ct !== 'string'){
+        throw new Error('corrupt envelope for ' + key);
+      }
+      const plaintext = await aesDecryptToString(sessionKey, envelope);
+      return { key, value: plaintext, shared: !!shared };
+    },
+    async set(key, value, shared){
+      if(!sessionKey) throw new Error('app is locked');
+      const envelope = await aesEncryptString(sessionKey, value);
+      return rawStorage.set(key, JSON.stringify(envelope), shared);
+    },
+    async delete(key, shared){
+      return rawStorage.delete(key, shared);
     }
   };
 
@@ -1417,6 +1672,53 @@
     return base;
   }
 
+  const EXPORT_ENVELOPE_MARKER = 'borderLedgerEncryptedBackup';
+
+  function triggerDownload(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // If the export-encryption toggle is on, prompts for a backup password and
+  // returns an encrypted envelope (self-contained: includes its own salt/iv,
+  // independent of the app's own passcode) wrapping either JSON text or raw
+  // ZIP bytes. Returns null if the user cancels the password prompt, or
+  // { encrypted:false } if the toggle is off (caller exports plaintext).
+  async function maybeEncryptExportPayload(data, isBinary, originalFormat){
+    const toggle = document.getElementById('exportEncryptToggle');
+    if(!toggle || !toggle.checked) return { encrypted:false };
+
+    const pass = await showPassPrompt({
+      title: '设置备份密码',
+      subtitle: '为这份导出文件设置一个密码，恢复时需要输入相同密码解密。请妥善保管此密码——忘记将无法恢复这份备份。',
+      confirmField: true, cancelable: true, submitLabel: '加密并导出', minLength: 4
+    });
+    if(pass === null) return null;
+
+    const salt = randomBytes(16);
+    const iv = randomBytes(12);
+    const key = await deriveKey(pass, salt, PBKDF2_ITERATIONS);
+    const plainBytes = isBinary ? data : new TextEncoder().encode(data);
+    const ctBuf = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, plainBytes);
+    const envelope = {
+      [EXPORT_ENVELOPE_MARKER]: true,
+      version: 1,
+      kdf: 'PBKDF2-SHA256',
+      iterations: PBKDF2_ITERATIONS,
+      salt: bufToB64(salt),
+      iv: bufToB64(iv),
+      originalFormat,
+      ciphertext: bufToB64(ctBuf)
+    };
+    return { encrypted:true, envelopeJSON: JSON.stringify(envelope) };
+  }
+
   async function exportJSON(){
     flashStatus('正在打包（含图片可能需要几秒）…');
     const exportTrips = [];
@@ -1428,17 +1730,19 @@
       settings,
       trips: exportTrips
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const jsonText = JSON.stringify(payload, null, 2);
     const today = new Date().toISOString().slice(0,10);
-    a.href = url;
-    a.download = `border-day-ledger-${today}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    flashStatus('已导出 JSON（含图片）');
+
+    const result = await maybeEncryptExportPayload(jsonText, false, 'json');
+    if(result === null){ flashStatus('已取消导出'); return; }
+
+    if(result.encrypted){
+      triggerDownload(new Blob([result.envelopeJSON], { type:'application/json' }), `border-day-ledger-${today}.encrypted.json`);
+      flashStatus('已导出加密备份（JSON）');
+    } else {
+      triggerDownload(new Blob([jsonText], { type:'application/json' }), `border-day-ledger-${today}.json`);
+      flashStatus('已导出 JSON（含图片，未加密）');
+    }
   }
 
   async function exportZIP(){
@@ -1472,19 +1776,66 @@
       zip.file('trips.json', JSON.stringify(manifest, null, 2));
 
       const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
       const today = new Date().toISOString().slice(0,10);
-      a.href = url;
-      a.download = `border-day-ledger-${today}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      flashStatus('已导出 ZIP（含图片）');
+
+      const arrayBuffer = await blob.arrayBuffer();
+      const result = await maybeEncryptExportPayload(arrayBuffer, true, 'zip');
+      if(result === null){ flashStatus('已取消导出'); return; }
+
+      if(result.encrypted){
+        triggerDownload(new Blob([result.envelopeJSON], { type:'application/json' }), `border-day-ledger-${today}.encrypted.json`);
+        flashStatus('已导出加密备份（ZIP）');
+      } else {
+        triggerDownload(blob, `border-day-ledger-${today}.zip`);
+        flashStatus('已导出 ZIP（含图片，未加密）');
+      }
     }catch(e){
       console.error('[border-ledger] ZIP export failed', e);
       alert('打包 ZIP 失败，请换用「导出为 JSON」试试。');
+    }
+  }
+
+  // Decrypts an encrypted-backup envelope (produced by maybeEncryptExportPayload)
+  // and routes the recovered content into the normal JSON or ZIP import path.
+  async function importEncryptedEnvelope(envelope){
+    if(envelope.kdf !== 'PBKDF2-SHA256' || !envelope.salt || !envelope.iv || !envelope.ciphertext){
+      alert('这个加密备份文件格式无法识别。');
+      return;
+    }
+    let attempts = 0;
+    while(attempts < 5){
+      const pass = await showPassPrompt({
+        title: '输入备份密码',
+        subtitle: '这是一份加密备份，请输入导出时设置的密码来解密。',
+        cancelable: true, submitLabel: '解密并导入', minLength: 1
+      });
+      if(pass === null) return;
+      try{
+        const salt = new Uint8Array(b64ToBuf(envelope.salt));
+        const iv = new Uint8Array(b64ToBuf(envelope.iv));
+        const key = await deriveKey(pass, salt, envelope.iterations || PBKDF2_ITERATIONS);
+        const ctBuf = b64ToBuf(envelope.ciphertext);
+        const ptBuf = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, ctBuf);
+
+        if(envelope.originalFormat === 'zip'){
+          let zip2;
+          try{ zip2 = await JSZip.loadAsync(ptBuf); }
+          catch(e){ alert('解密成功，但备份内容已损坏，无法解析。'); return; }
+          const manifestEntry = zip2.file('trips.json');
+          if(!manifestEntry){ alert('这个备份里没有找到 trips.json。'); return; }
+          const manifest = JSON.parse(await manifestEntry.async('string'));
+          await processZipImportPayload(zip2, manifest);
+        } else {
+          const text = new TextDecoder().decode(ptBuf);
+          const parsed = JSON.parse(text);
+          await processJSONImportPayload(parsed);
+        }
+        return;
+      }catch(e){
+        attempts++;
+        if(attempts >= 5){ alert('密码错误次数过多，已取消导入。'); return; }
+        alert('密码错误，或文件已损坏，请重新输入。');
+      }
     }
   }
 
@@ -1661,6 +2012,81 @@
       && typeof t.end === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.end);
   }
 
+  // shared body of the plaintext JSON import — also reused by
+  // importEncryptedEnvelope() once it has decrypted an encrypted backup
+  async function processJSONImportPayload(parsed){
+    const incomingTrips = Array.isArray(parsed.trips) ? parsed.trips.filter(isValidTrip) : [];
+    if(incomingTrips.length === 0){
+      alert('文件中没有找到有效的行程记录。');
+      return;
+    }
+
+    const skippedCount = (Array.isArray(parsed.trips) ? parsed.trips.length : 0) - incomingTrips.length;
+    const imageCount = incomingTrips.filter(t => typeof t.image === 'string' && t.image.startsWith('data:image')).length;
+    const mode = confirm(
+      `找到 ${incomingTrips.length} 条行程记录${imageCount>0 ? '（含 ' + imageCount + ' 张图片）' : ''}` +
+      `${skippedCount>0 ? '（跳过 ' + skippedCount + ' 条格式不正确的记录）' : ''}。\n\n` +
+      `点击「确定」= 合并到现有记录\n点击「取消」= 用导入内容替换现有全部记录`
+    );
+
+    flashStatus('正在导入…');
+
+    // build fresh trip objects with new ids, restoring any attached image(s) to storage
+    // accepts both the current "images" array format and the older single "image" field
+    let failedImageCount = 0;
+    async function buildTripFromImport(t){
+      const newId = 't' + Date.now() + Math.floor(Math.random()*100000) + Math.floor(Math.random()*100000);
+      const sourceImages = Array.isArray(t.images) ? t.images
+        : (typeof t.image === 'string' ? [t.image] : []);
+      const imageIds = [];
+      for(const dataURL of sourceImages){
+        if(typeof dataURL !== 'string' || !dataURL.startsWith('data:image')) continue;
+        const imgId = newImageId();
+        const ok = await setTripImage(newId, imgId, dataURL);
+        if(ok) imageIds.push(imgId); else failedImageCount++;
+      }
+      return {
+        id: newId,
+        dest: t.dest,
+        otherName: t.dest === 'OTHER' ? (t.otherName || '') : '',
+        start: t.start,
+        end: t.end,
+        note: t.note || '',
+        transportMode: ['AIR','LAND','SEA','OTHER'].includes(t.transportMode) ? t.transportMode : 'AIR',
+        route: t.route || '',
+        imageIds
+      };
+    }
+
+    const builtTrips = [];
+    for(const t of incomingTrips){
+      builtTrips.push(await buildTripFromImport(t));
+    }
+
+    if(mode){
+      // merge with existing records
+      trips = trips.concat(builtTrips);
+    } else {
+      // replace — first drop images belonging to the records being discarded
+      for(const old of trips){
+        await deleteAllTripImages(old);
+      }
+      trips = builtTrips;
+    }
+
+    if(parsed.settings && (parsed.settings.base === 'MY' || parsed.settings.base === 'SG')){
+      if(confirm(`导入文件中的常驻地设置为「${parsed.settings.base === 'SG' ? '新加坡' : '马来西亚'}」，是否应用？`)){
+        settings.base = parsed.settings.base;
+        baseLocationEl.value = settings.base;
+        await saveSettings();
+      }
+    }
+
+    await saveTrips();
+    render();
+    flashStatus(failedImageCount > 0 ? `导入完成（${failedImageCount} 张图片未能保存）` : '导入完成');
+  }
+
   function importJSON(file){
     const reader = new FileReader();
     reader.onload = async ()=>{
@@ -1671,108 +2097,19 @@
         alert('无法解析该文件，请确认是从本工具导出的 JSON 文件。');
         return;
       }
-      const incomingTrips = Array.isArray(parsed.trips) ? parsed.trips.filter(isValidTrip) : [];
-      if(incomingTrips.length === 0){
-        alert('文件中没有找到有效的行程记录。');
+      if(parsed && parsed[EXPORT_ENVELOPE_MARKER] === true){
+        await importEncryptedEnvelope(parsed);
         return;
       }
-
-      const skippedCount = (Array.isArray(parsed.trips) ? parsed.trips.length : 0) - incomingTrips.length;
-      const imageCount = incomingTrips.filter(t => typeof t.image === 'string' && t.image.startsWith('data:image')).length;
-      const mode = confirm(
-        `找到 ${incomingTrips.length} 条行程记录${imageCount>0 ? '（含 ' + imageCount + ' 张图片）' : ''}` +
-        `${skippedCount>0 ? '（跳过 ' + skippedCount + ' 条格式不正确的记录）' : ''}。\n\n` +
-        `点击「确定」= 合并到现有记录\n点击「取消」= 用导入内容替换现有全部记录`
-      );
-
-      flashStatus('正在导入…');
-
-      // build fresh trip objects with new ids, restoring any attached image(s) to storage
-      // accepts both the current "images" array format and the older single "image" field
-      let failedImageCount = 0;
-      async function buildTripFromImport(t){
-        const newId = 't' + Date.now() + Math.floor(Math.random()*100000) + Math.floor(Math.random()*100000);
-        const sourceImages = Array.isArray(t.images) ? t.images
-          : (typeof t.image === 'string' ? [t.image] : []);
-        const imageIds = [];
-        for(const dataURL of sourceImages){
-          if(typeof dataURL !== 'string' || !dataURL.startsWith('data:image')) continue;
-          const imgId = newImageId();
-          const ok = await setTripImage(newId, imgId, dataURL);
-          if(ok) imageIds.push(imgId); else failedImageCount++;
-        }
-        return {
-          id: newId,
-          dest: t.dest,
-          otherName: t.dest === 'OTHER' ? (t.otherName || '') : '',
-          start: t.start,
-          end: t.end,
-          note: t.note || '',
-          transportMode: ['AIR','LAND','SEA','OTHER'].includes(t.transportMode) ? t.transportMode : 'AIR',
-          route: t.route || '',
-          imageIds
-        };
-      }
-
-      const builtTrips = [];
-      for(const t of incomingTrips){
-        builtTrips.push(await buildTripFromImport(t));
-      }
-
-      if(mode){
-        // merge with existing records
-        trips = trips.concat(builtTrips);
-      } else {
-        // replace — first drop images belonging to the records being discarded
-        for(const old of trips){
-          await deleteAllTripImages(old);
-        }
-        trips = builtTrips;
-      }
-
-      if(parsed.settings && (parsed.settings.base === 'MY' || parsed.settings.base === 'SG')){
-        if(confirm(`导入文件中的常驻地设置为「${parsed.settings.base === 'SG' ? '新加坡' : '马来西亚'}」，是否应用？`)){
-          settings.base = parsed.settings.base;
-          baseLocationEl.value = settings.base;
-          await saveSettings();
-        }
-      }
-
-      await saveTrips();
-      render();
-      flashStatus(failedImageCount > 0 ? `导入完成（${failedImageCount} 张图片未能保存）` : '导入完成');
+      await processJSONImportPayload(parsed);
     };
     reader.onerror = ()=>{ alert('读取文件失败，请重试。'); };
     reader.readAsText(file);
   }
 
-  async function importZIP(file){
-    if(typeof JSZip === 'undefined'){
-      alert('ZIP 组件加载失败（可能是网络问题），请刷新页面重试。');
-      return;
-    }
-    flashStatus('正在解析 ZIP…');
-    let zip;
-    try{
-      zip = await JSZip.loadAsync(file);
-    }catch(e){
-      alert('无法解析该 ZIP 文件，请确认是从本工具导出的备份。');
-      return;
-    }
-
-    const manifestEntry = zip.file('trips.json');
-    if(!manifestEntry){
-      alert('这个 ZIP 里没有找到 trips.json，请确认是从本工具导出的备份。');
-      return;
-    }
-    let manifest;
-    try{
-      manifest = JSON.parse(await manifestEntry.async('string'));
-    }catch(e){
-      alert('trips.json 内容有问题，无法解析。');
-      return;
-    }
-
+  // shared body of the ZIP import — also reused by importEncryptedEnvelope()
+  // once it has decrypted an encrypted ZIP backup into an in-memory JSZip
+  async function processZipImportPayload(zip, manifest){
     const incomingTrips = Array.isArray(manifest.trips) ? manifest.trips.filter(isValidTrip) : [];
     if(incomingTrips.length === 0){
       alert('文件中没有找到有效的行程记录。');
@@ -1846,6 +2183,46 @@
     flashStatus(failedImageCount > 0 ? `导入完成（${failedImageCount} 张图片未能保存）` : '导入完成');
   }
 
+  async function importZIP(file){
+    if(typeof JSZip === 'undefined'){
+      alert('ZIP 组件加载失败（可能是网络问题），请刷新页面重试。');
+      return;
+    }
+    flashStatus('正在解析…');
+    let zip;
+    try{
+      zip = await JSZip.loadAsync(file);
+    }catch(e){
+      // not a real ZIP archive — it might be an encrypted-backup envelope
+      // (produced when "导出加密" was on for a ZIP export)
+      try{
+        const text = await file.text();
+        const maybeEnvelope = JSON.parse(text);
+        if(maybeEnvelope && maybeEnvelope[EXPORT_ENVELOPE_MARKER] === true){
+          await importEncryptedEnvelope(maybeEnvelope);
+          return;
+        }
+      }catch(e2){ /* fall through to the generic error below */ }
+      alert('无法解析该 ZIP 文件，请确认是从本工具导出的备份。');
+      return;
+    }
+
+    const manifestEntry = zip.file('trips.json');
+    if(!manifestEntry){
+      alert('这个 ZIP 里没有找到 trips.json，请确认是从本工具导出的备份。');
+      return;
+    }
+    let manifest;
+    try{
+      manifest = JSON.parse(await manifestEntry.async('string'));
+    }catch(e){
+      alert('trips.json 内容有问题，无法解析。');
+      return;
+    }
+
+    await processZipImportPayload(zip, manifest);
+  }
+
   document.getElementById('exportBtn').addEventListener('click', exportJSON);
   document.getElementById('exportZipBtn').addEventListener('click', exportZIP);
   document.getElementById('importBtn').addEventListener('click', ()=>{
@@ -1893,9 +2270,152 @@
     }
   }
 
+  // ---------------------------------------------------------------------
+  // Reusable passcode-prompt modal. Returns a Promise<string|null> resolving
+  // to the entered passcode, or null if the user cancelled (only possible
+  // when cancelable is true).
+  // ---------------------------------------------------------------------
+  const lockOverlayEl = document.getElementById('lockOverlay');
+  const lockTitleEl = document.getElementById('lockTitle');
+  const lockSubtitleEl = document.getElementById('lockSubtitle');
+  const lockPass1El = document.getElementById('lockPass1');
+  const lockPass2El = document.getElementById('lockPass2');
+  const lockErrorEl = document.getElementById('lockError');
+  const lockSubmitBtn = document.getElementById('lockSubmitBtn');
+  const lockCancelBtn = document.getElementById('lockCancelBtn');
+  const lockFootnoteEl = document.getElementById('lockFootnote');
+
+  function showPassPrompt(opts){
+    return new Promise((resolve)=>{
+      lockTitleEl.textContent = opts.title || '';
+      lockSubtitleEl.textContent = opts.subtitle || '';
+      lockPass1El.value = '';
+      lockPass2El.value = '';
+      lockErrorEl.textContent = '';
+      lockPass1El.placeholder = opts.placeholder1 || '密码';
+      lockPass2El.style.display = opts.confirmField ? 'block' : 'none';
+      lockCancelBtn.style.display = opts.cancelable ? 'inline-block' : 'none';
+      lockSubmitBtn.textContent = opts.submitLabel || '确定';
+      lockFootnoteEl.innerHTML = '';
+      if(opts.showForgotLink){
+        const a = document.createElement('a');
+        a.textContent = '忘记密码？';
+        a.addEventListener('click', ()=>{ cleanup(); resolve('__FORGOT__'); });
+        lockFootnoteEl.appendChild(a);
+      }
+      lockOverlayEl.classList.add('open');
+      setTimeout(()=> lockPass1El.focus(), 50);
+
+      function cleanup(){
+        lockOverlayEl.classList.remove('open');
+        lockSubmitBtn.removeEventListener('click', onSubmit);
+        lockCancelBtn.removeEventListener('click', onCancel);
+        lockPass1El.removeEventListener('keydown', onKey);
+        lockPass2El.removeEventListener('keydown', onKey);
+      }
+      function onSubmit(){
+        const v1 = lockPass1El.value;
+        const v2 = lockPass2El.value;
+        const minLen = opts.minLength || 4;
+        if(!v1 || v1.length < minLen){ lockErrorEl.textContent = `密码至少需要 ${minLen} 位`; return; }
+        if(opts.confirmField && v1 !== v2){ lockErrorEl.textContent = '两次输入的密码不一致'; return; }
+        cleanup();
+        resolve(v1);
+      }
+      function onCancel(){ cleanup(); resolve(null); }
+      function onKey(e){ if(e.key === 'Enter'){ e.preventDefault(); onSubmit(); } }
+      lockSubmitBtn.addEventListener('click', onSubmit);
+      lockCancelBtn.addEventListener('click', onCancel);
+      lockPass1El.addEventListener('keydown', onKey);
+      lockPass2El.addEventListener('keydown', onKey);
+    });
+  }
+
+  async function confirmResetAllData(){
+    if(!confirm('忘记密码将导致这台设备上已加密保存的全部数据（行程记录、图片、设置）永久无法恢复，且必须清空后才能重新开始使用。此操作不可撤销，确定要继续吗？')) return false;
+    return confirm('请再次确认：真的要清空全部数据并重新设置密码吗？此操作无法撤销。');
+  }
+
+  async function runSetupFlow(){
+    while(true){
+      const pass = await showPassPrompt({
+        title: '🔒 设置访问密码',
+        subtitle: '首次使用需要设置一个密码，用于加密保护这台设备上保存的所有数据（行程记录、图片、设置）。请牢记此密码——如果忘记，加密数据将无法恢复。',
+        confirmField: true, cancelable: false, submitLabel: '设置密码', minLength: 4
+      });
+      if(pass){
+        flashStatusSafe('正在加密初始化…');
+        await setupPasscode(pass);
+        return;
+      }
+    }
+  }
+
+  async function runUnlockFlow(){
+    while(true){
+      const pass = await showPassPrompt({
+        title: '🔒 输入密码解锁',
+        subtitle: '请输入访问密码以解密并查看你的行程记录。',
+        confirmField: false, cancelable: false, submitLabel: '解锁',
+        showForgotLink: true, minLength: 1
+      });
+      if(pass === '__FORGOT__'){
+        const wipe = await confirmResetAllData();
+        if(wipe){
+          await wipeAllLocalData();
+          location.reload();
+          return;
+        }
+        continue;
+      }
+      const ok = await tryUnlock(pass);
+      if(ok) return;
+      lockErrorEl.textContent = '密码错误，请重试。';
+      await new Promise(res=>setTimeout(res, 0));
+    }
+  }
+
+  function flashStatusSafe(msg){ try{ flashStatus(msg); }catch(e){ console.log(msg); } }
+
+  document.getElementById('changePassBtn').addEventListener('click', async ()=>{
+    const oldPass = await showPassPrompt({
+      title: '更改密码', subtitle: '请输入当前密码以继续。',
+      cancelable: true, submitLabel: '下一步', minLength: 1
+    });
+    if(oldPass === null) return;
+    const newPass = await showPassPrompt({
+      title: '设置新密码', subtitle: '请输入新密码并确认。',
+      confirmField: true, cancelable: true, submitLabel: '确认更改', minLength: 4
+    });
+    if(newPass === null) return;
+    flashStatus('正在更新加密…');
+    try{
+      await changePasscode(oldPass, newPass);
+      flashStatus('密码已更新');
+    }catch(e){
+      alert('当前密码不正确，未更改密码。');
+    }
+  });
+
+  document.getElementById('lockNowBtn').addEventListener('click', async ()=>{
+    sessionKey = null;
+    lockOverlayEl.classList.add('open');
+    await runUnlockFlow();
+    lockOverlayEl.classList.remove('open');
+    await loadAll();
+  });
+
   (async function init(){
     await initLocalBackend();
     showStorageModeNote();
+    const meta = await getLockMeta();
+    lockOverlayEl.classList.add('open');
+    if(!meta){
+      await runSetupFlow();
+    } else {
+      await runUnlockFlow();
+    }
+    lockOverlayEl.classList.remove('open');
     await loadAll();
   })();
 })();
