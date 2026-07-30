@@ -2,7 +2,7 @@
 // Bump CACHE_NAME (e.g. v1 -> v2) whenever index.html or any file in
 // APP_SHELL changes, and upload index.html + sw.js together — otherwise
 // returning visitors may keep seeing the old cached version.
-const CACHE_NAME = 'border-day-ledger-cache-v4';
+const CACHE_NAME = 'border-day-ledger-cache-v5';
 
 const APP_SHELL = [
   './',

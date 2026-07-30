@@ -409,6 +409,7 @@
   <div class="lock-box">
     <div class="lock-title" id="lockTitle">🔒 输入密码解锁</div>
     <div class="lock-sub" id="lockSubtitle"></div>
+    <button type="button" class="btn" id="lockBioBtn" style="display:none; width:100%; margin-bottom:12px;">👆 使用指纹 / Face ID 解锁</button>
     <input type="password" id="lockPass1" autocomplete="off" placeholder="密码">
     <input type="password" id="lockPass2" autocomplete="off" placeholder="确认密码" style="display:none;">
     <div class="lock-error" id="lockError"></div>
@@ -491,11 +492,15 @@
           <button type="button" class="btn ghost" id="lockNowBtn">🔒 立即锁定</button>
         </div>
       </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button type="button" class="btn ghost" id="bioToggleBtn">指纹 / Face ID 解锁</button>
+      </div>
       <div class="save-status" id="saveStatus"></div>
     </div>
     <div id="storageModeNote" style="font-size:11.5px; color:var(--grey-text); margin-top:10px; display:none;"></div>
     <div style="font-size:11.5px; color:var(--grey-text); margin-top:10px;">
-      🔒 本工具所有数据均使用密码派生的密钥加密保存（PBKDF2 + AES-GCM）。密码仅保存在本次会话的内存中，不会被存储。
+      🔒 本工具所有数据均使用密码派生的密钥加密保存（PBKDF2 + AES-GCM）。密码仅保存在本次会话的内存中，不会被存储。指纹/Face ID 解锁只是密码的便捷入口（需要 iOS 18+ / 较新版 Android Chrome）——换设备或清除浏览器数据后，仍需用密码解锁。
     </div>
   </section>
 
@@ -901,27 +906,37 @@
     sessionKey = newKey;
   }
 
-  async function tryUnlock(passcode){
-    const meta = await getLockMeta();
-    if(!meta) return false;
+  // Checks a passcode against the stored lock-meta check value without
+  // side effects (does not set sessionKey). Used by tryUnlock, changePasscode,
+  // and biometric enrollment (to confirm identity before wrapping the passcode).
+  async function verifyPasscodeAgainstMeta(passcode, meta){
     try{
       const salt = new Uint8Array(b64ToBuf(meta.salt));
       const key = await deriveKey(passcode, salt, meta.iterations || PBKDF2_ITERATIONS);
       const pt = await aesDecryptToString(key, meta.check);
-      if(pt !== LOCK_CHECK_PLAINTEXT) return false;
-      sessionKey = key;
-      return true;
-    }catch(e){ return false; }
+      return pt === LOCK_CHECK_PLAINTEXT ? key : null;
+    }catch(e){ return null; }
+  }
+  async function verifyPasscode(passcode){
+    const meta = await getLockMeta();
+    if(!meta) return false;
+    return !!(await verifyPasscodeAgainstMeta(passcode, meta));
+  }
+
+  async function tryUnlock(passcode){
+    const meta = await getLockMeta();
+    if(!meta) return false;
+    const key = await verifyPasscodeAgainstMeta(passcode, meta);
+    if(!key) return false;
+    sessionKey = key;
+    return true;
   }
 
   async function changePasscode(oldPass, newPass){
     const meta = await getLockMeta();
     if(!meta) throw new Error('no-lock-meta');
-    const oldSalt = new Uint8Array(b64ToBuf(meta.salt));
-    const oldKey = await deriveKey(oldPass, oldSalt, meta.iterations || PBKDF2_ITERATIONS);
-    let pt;
-    try{ pt = await aesDecryptToString(oldKey, meta.check); }catch(e){ pt = null; }
-    if(pt !== LOCK_CHECK_PLAINTEXT) throw new Error('wrong-old-passcode');
+    const oldKey = await verifyPasscodeAgainstMeta(oldPass, meta);
+    if(!oldKey) throw new Error('wrong-old-passcode');
 
     const newSalt = randomBytes(16);
     const newKey = await deriveKey(newPass, newSalt, PBKDF2_ITERATIONS);
@@ -929,7 +944,137 @@
     const check = await aesEncryptString(newKey, LOCK_CHECK_PLAINTEXT);
     await saveLockMeta({ v:1, salt: bufToB64(newSalt), iterations: PBKDF2_ITERATIONS, check });
     sessionKey = newKey;
+    // the old passcode is no longer valid — any biometric-wrapped copy of it
+    // is now stale, so drop it rather than leave a silent way in with a dead passcode
+    await disableBiometricUnlock();
   }
+
+  // ---------------------------------------------------------------------
+  // Optional biometric unlock (Face ID / Touch ID / Android fingerprint),
+  // via the WebAuthn PRF extension. This is a convenience layer only: it
+  // works by using a biometric-gated symmetric key (derived from the
+  // platform authenticator's PRF output) to encrypt-and-store the *actual
+  // passcode*, then decrypts it on future unlocks and feeds it through the
+  // normal tryUnlock() path. The passcode itself always remains the
+  // required fallback/recovery mechanism.
+  // Support: Android Chrome (broad), iOS/Safari 18+ (iCloud Keychain
+  // passkeys). Not supported: Firefox, older iOS/Safari.
+  // ---------------------------------------------------------------------
+  const BIO_META_KEY = 'border-ledger:biometric-unlock';
+
+  function biometricSupported(){
+    return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+  }
+  async function biometricPlatformAvailable(){
+    if(!biometricSupported()) return false;
+    try{ return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); }
+    catch(e){ return false; }
+  }
+  async function deriveAesKeyFromPrfBytes(bytes){
+    return crypto.subtle.importKey('raw', bytes, { name:'AES-GCM' }, false, ['encrypt','decrypt']);
+  }
+
+  async function enableBiometricUnlock(currentPasscode){
+    if(!(await biometricPlatformAvailable())){
+      alert('这台设备/浏览器不支持指纹或 Face ID 解锁。');
+      return false;
+    }
+    const salt = randomBytes(32);
+    let cred;
+    try{
+      cred = await navigator.credentials.create({
+        publicKey: {
+          challenge: randomBytes(32),
+          rp: { name: '关口记录簿' },
+          user: { id: randomBytes(16), name: 'border-ledger-local', displayName: '关口记录簿本机解锁' },
+          pubKeyCredParams: [{ type:'public-key', alg:-7 }, { type:'public-key', alg:-257 }],
+          authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required', residentKey:'preferred' },
+          timeout: 60000,
+          extensions: { prf: { eval: { first: salt } } }
+        }
+      });
+    }catch(e){
+      console.error('[border-ledger] biometric registration failed', e);
+      alert('设置指纹/Face ID 解锁失败（可能被取消或设备不支持），请重试。');
+      return false;
+    }
+
+    let prfBytes = null;
+    const ext = cred.getClientExtensionResults();
+    if(ext && ext.prf && ext.prf.results && ext.prf.results.first){
+      prfBytes = ext.prf.results.first;
+    } else {
+      // some platforms only surface the PRF output on a follow-up assertion
+      try{
+        const assertion = await navigator.credentials.get({
+          publicKey: {
+            challenge: randomBytes(32),
+            allowCredentials: [{ id: cred.rawId, type:'public-key' }],
+            userVerification: 'required',
+            extensions: { prf: { eval: { first: salt } } }
+          }
+        });
+        const aext = assertion.getClientExtensionResults();
+        prfBytes = aext && aext.prf && aext.prf.results && aext.prf.results.first;
+      }catch(e){ /* leave prfBytes null */ }
+    }
+
+    if(!prfBytes){
+      alert('这台设备的浏览器暂不支持所需的加密扩展（PRF），无法启用指纹/Face ID 解锁。');
+      return false;
+    }
+
+    const bioKey = await deriveAesKeyFromPrfBytes(prfBytes);
+    const iv = randomBytes(12);
+    const ctBuf = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, bioKey, new TextEncoder().encode(currentPasscode));
+    await rawStorage.set(BIO_META_KEY, JSON.stringify({
+      v: 1,
+      credentialId: bufToB64(cred.rawId),
+      salt: bufToB64(salt),
+      iv: bufToB64(iv),
+      ct: bufToB64(ctBuf)
+    }), false);
+    return true;
+  }
+
+  async function disableBiometricUnlock(){
+    await rawStorage.delete(BIO_META_KEY, false).catch(()=>{});
+  }
+
+  // returns true on success (also sets sessionKey via tryUnlock); false on
+  // any failure/cancellation — caller should fall back to the passcode field
+  async function tryBiometricUnlock(){
+    const rec = await rawStorage.get(BIO_META_KEY, false).catch(()=>null);
+    if(!rec) return false;
+    let meta;
+    try{ meta = JSON.parse(rec.value); }catch(e){ return false; }
+
+    let assertion;
+    try{
+      assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge: randomBytes(32),
+          allowCredentials: [{ id: b64ToBuf(meta.credentialId), type:'public-key' }],
+          userVerification: 'required',
+          extensions: { prf: { eval: { first: new Uint8Array(b64ToBuf(meta.salt)) } } }
+        }
+      });
+    }catch(e){ return false; }
+
+    const ext = assertion.getClientExtensionResults();
+    const prfBytes = ext && ext.prf && ext.prf.results && ext.prf.results.first;
+    if(!prfBytes) return false;
+
+    try{
+      const bioKey = await deriveAesKeyFromPrfBytes(prfBytes);
+      const iv = new Uint8Array(b64ToBuf(meta.iv));
+      const ptBuf = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, bioKey, b64ToBuf(meta.ct));
+      const passcode = new TextDecoder().decode(ptBuf);
+      return await tryUnlock(passcode);
+    }catch(e){ return false; }
+  }
+
+
 
   // transparent encrypt-before-write / decrypt-after-read wrapper — every
   // other part of the app reads/writes through this, unaware of the crypto
@@ -2278,6 +2423,7 @@
   const lockOverlayEl = document.getElementById('lockOverlay');
   const lockTitleEl = document.getElementById('lockTitle');
   const lockSubtitleEl = document.getElementById('lockSubtitle');
+  const lockBioBtn = document.getElementById('lockBioBtn');
   const lockPass1El = document.getElementById('lockPass1');
   const lockPass2El = document.getElementById('lockPass2');
   const lockErrorEl = document.getElementById('lockError');
@@ -2296,6 +2442,7 @@
       lockPass2El.style.display = opts.confirmField ? 'block' : 'none';
       lockCancelBtn.style.display = opts.cancelable ? 'inline-block' : 'none';
       lockSubmitBtn.textContent = opts.submitLabel || '确定';
+      lockBioBtn.style.display = opts.bioButton ? 'block' : 'none';
       lockFootnoteEl.innerHTML = '';
       if(opts.showForgotLink){
         const a = document.createElement('a');
@@ -2310,6 +2457,7 @@
         lockOverlayEl.classList.remove('open');
         lockSubmitBtn.removeEventListener('click', onSubmit);
         lockCancelBtn.removeEventListener('click', onCancel);
+        lockBioBtn.removeEventListener('click', onBio);
         lockPass1El.removeEventListener('keydown', onKey);
         lockPass2El.removeEventListener('keydown', onKey);
       }
@@ -2323,9 +2471,11 @@
         resolve(v1);
       }
       function onCancel(){ cleanup(); resolve(null); }
+      function onBio(){ cleanup(); resolve('__BIO__'); }
       function onKey(e){ if(e.key === 'Enter'){ e.preventDefault(); onSubmit(); } }
       lockSubmitBtn.addEventListener('click', onSubmit);
       lockCancelBtn.addEventListener('click', onCancel);
+      lockBioBtn.addEventListener('click', onBio);
       lockPass1El.addEventListener('keydown', onKey);
       lockPass2El.addEventListener('keydown', onKey);
     });
@@ -2352,13 +2502,29 @@
   }
 
   async function runUnlockFlow(){
+    const bioRec = await rawStorage.get(BIO_META_KEY, false).catch(()=>null);
+    const canBio = !!bioRec && await biometricPlatformAvailable();
+
+    if(canBio){
+      const ok = await tryBiometricUnlock();
+      if(ok) return;
+      // fell through — user cancelled, failed verification, or it's
+      // otherwise unavailable right now; drop to the password prompt below
+    }
+
     while(true){
       const pass = await showPassPrompt({
         title: '🔒 输入密码解锁',
         subtitle: '请输入访问密码以解密并查看你的行程记录。',
         confirmField: false, cancelable: false, submitLabel: '解锁',
-        showForgotLink: true, minLength: 1
+        showForgotLink: true, minLength: 1, bioButton: canBio
       });
+      if(pass === '__BIO__'){
+        const ok = await tryBiometricUnlock();
+        if(ok) return;
+        lockErrorEl.textContent = '指纹/Face ID 验证失败，请重试或输入密码。';
+        continue;
+      }
       if(pass === '__FORGOT__'){
         const wipe = await confirmResetAllData();
         if(wipe){
@@ -2377,6 +2543,46 @@
 
   function flashStatusSafe(msg){ try{ flashStatus(msg); }catch(e){ console.log(msg); } }
 
+  async function refreshBioButtonLabel(){
+    const btn = document.getElementById('bioToggleBtn');
+    if(!btn) return;
+    const supported = await biometricPlatformAvailable();
+    if(!supported){
+      btn.textContent = '指纹/Face ID 解锁（此设备不支持）';
+      btn.disabled = true;
+      return;
+    }
+    btn.disabled = false;
+    const rec = await rawStorage.get(BIO_META_KEY, false).catch(()=>null);
+    btn.textContent = rec ? '🔓 关闭指纹/Face ID 解锁' : '👆 启用指纹/Face ID 解锁';
+    btn.dataset.enabled = rec ? '1' : '0';
+  }
+
+  document.getElementById('bioToggleBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('bioToggleBtn');
+    if(btn.dataset.enabled === '1'){
+      if(confirm('确定要关闭指纹/Face ID 解锁吗？之后仍可以用密码解锁。')){
+        await disableBiometricUnlock();
+        await refreshBioButtonLabel();
+        flashStatus('已关闭指纹/Face ID 解锁');
+      }
+      return;
+    }
+    const pass = await showPassPrompt({
+      title: '启用指纹 / Face ID 解锁',
+      subtitle: '请先输入当前密码以确认身份，随后系统会请求你完成一次指纹或 Face ID 验证。',
+      cancelable: true, submitLabel: '下一步', minLength: 1
+    });
+    if(pass === null) return;
+    const ok = await verifyPasscode(pass);
+    if(!ok){ alert('密码不正确。'); return; }
+    const enabled = await enableBiometricUnlock(pass);
+    if(enabled){
+      flashStatus('已启用指纹/Face ID 解锁');
+      await refreshBioButtonLabel();
+    }
+  });
+
   document.getElementById('changePassBtn').addEventListener('click', async ()=>{
     const oldPass = await showPassPrompt({
       title: '更改密码', subtitle: '请输入当前密码以继续。',
@@ -2391,7 +2597,8 @@
     flashStatus('正在更新加密…');
     try{
       await changePasscode(oldPass, newPass);
-      flashStatus('密码已更新');
+      flashStatus('密码已更新（指纹/Face ID 解锁已重置，如需请重新启用）');
+      await refreshBioButtonLabel();
     }catch(e){
       alert('当前密码不正确，未更改密码。');
     }
@@ -2417,6 +2624,7 @@
     }
     lockOverlayEl.classList.remove('open');
     await loadAll();
+    await refreshBioButtonLabel();
   })();
 })();
 </script>
