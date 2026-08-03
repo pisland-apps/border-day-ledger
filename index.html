@@ -631,7 +631,10 @@
   </section>
 
   <section class="panel">
-    <div class="panel-title"><span class="tick"></span>年度天数总览</div>
+    <div class="panel-title" style="justify-content:space-between; flex-wrap:wrap; gap:10px;">
+      <span style="display:flex; align-items:center; gap:8px;"><span class="tick"></span>年度天数总览</span>
+      <select id="overviewYearSelect" style="min-width:100px;"></select>
+    </div>
     <div id="yearCards"></div>
   </section>
 
@@ -1112,6 +1115,8 @@
   const otherNameInput = document.getElementById('otherName');
   const tripForm = document.getElementById('tripForm');
   const yearCardsEl = document.getElementById('yearCards');
+  const overviewYearSelectEl = document.getElementById('overviewYearSelect');
+  let selectedOverviewYear = new Date().getFullYear();
   const tripTableWrap = document.getElementById('tripTableWrap');
   const tripImageInput = document.getElementById('tripImage');
   const cameraInput = document.getElementById('cameraInput');
@@ -1423,6 +1428,13 @@
     render();
   });
 
+  if(overviewYearSelectEl){
+    overviewYearSelectEl.addEventListener('change', ()=>{
+      selectedOverviewYear = parseInt(overviewYearSelectEl.value, 10);
+      renderYearCards();
+    });
+  }
+
   let editingId = null;
 
   tripForm.addEventListener('submit', async (e)=>{
@@ -1614,12 +1626,29 @@
     });
   }
 
+  function renderOverviewYearSelect(data){
+    if(!overviewYearSelectEl) return;
+    if(data.length === 0){
+      const y = new Date().getFullYear();
+      overviewYearSelectEl.innerHTML = `<option value="${y}">${y}</option>`;
+      selectedOverviewYear = y;
+      return;
+    }
+    if(!data.some(d => d.year === selectedOverviewYear)){
+      selectedOverviewYear = data[0].year;
+    }
+    overviewYearSelectEl.innerHTML = data.map(d=>`<option value="${d.year}">${d.year}</option>`).join('');
+    overviewYearSelectEl.value = String(selectedOverviewYear);
+  }
+
   function renderYearCards(){
-    const data = computeYearlyData();
+    const allData = computeYearlyData();
+    renderOverviewYearSelect(allData);
     if(trips.length===0){
       yearCardsEl.innerHTML = '<div class="empty-state">还没有任何行程记录 —— 添加第一条行程，年度统计会自动出现在这里。</div>';
       return;
     }
+    const data = allData.filter(d => d.year === selectedOverviewYear);
     yearCardsEl.innerHTML = data.map(d=>{
       const myPct = (d.myDays/d.totalDays*100).toFixed(1);
       const sgPct = (d.sgDays/d.totalDays*100).toFixed(1);
