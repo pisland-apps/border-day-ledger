@@ -3,6 +3,36 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--
+  IMPORTANT — READ BEFORE EDITING THE TWO INLINE SCRIPT BLOCKS IN THIS FILE:
+  script-src below allow-lists this file's two inline script blocks by exact
+  sha256 hash instead of 'unsafe-inline'. If you change so much as one
+  character inside either block, its hash changes — and if the CSP hash
+  isn't updated to match, the browser will SILENTLY block that script from
+  running. The page will still load, it'll just do nothing (no console
+  errors visible unless you check the browser's console, which will show
+  a CSP violation).
+
+  How to fix after an edit:
+    1. Copy everything inside the script block you changed (just the JS,
+       not the opening/closing script tags) into its own file, e.g. script.js
+    2. Run:  openssl dgst -sha256 -binary script.js | openssl base64 -A
+    3. Prepend "sha256-" to that output and swap it in for the matching
+       hash in the script-src line below.
+  (No Python or Node needed — openssl ships on macOS/Linux by default.)
+-->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' https://cdnjs.cloudflare.com 'sha256-isc6h/ki4NSrOv0DUHet2w+56C2fKu3tJBylz9dx9pQ=' 'sha256-kW+rtVzNXm+sKdyPJoGq4ZsDV5dBfAnIhWh8G1wif+k=';
+  style-src 'self' 'unsafe-inline';
+  img-src 'self' data:;
+  font-src 'self';
+  connect-src 'self';
+  worker-src 'self';
+  object-src 'none';
+  base-uri 'none';
+  form-action 'self';
+">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'%3E%3Ccircle cx='120' cy='120' r='118' fill='%23F2EEE3' stroke='%23C9BFA6' stroke-width='1.5'/%3E%3Ccircle cx='120' cy='120' r='104' fill='none' stroke='%231E2A44' stroke-width='4' stroke-dasharray='4 9'/%3E%3Cg transform='translate(120,124)'%3E%3Crect x='-32' y='-34' width='9' height='52' rx='1.5' fill='%231E2A44'/%3E%3Crect x='23' y='-34' width='9' height='52' rx='1.5' fill='%231E2A44'/%3E%3Crect x='-36' y='-44' width='72' height='10' rx='1.5' fill='%231E2A44'/%3E%3Cg transform='rotate(-28)'%3E%3Crect x='-3' y='-3' width='46' height='7' rx='3' fill='%23A63A2E'/%3E%3Ccircle cx='-3' cy='0.5' r='5' fill='%23A63A2E'/%3E%3C/g%3E%3Crect x='-40' y='20' width='80' height='6' rx='2' fill='%233E6259'/%3E%3Cg transform='translate(-52,4)'%3E%3Cpath d='M0,-14 C7,-14 12,-9 12,-2 C12,7 0,18 0,18 C0,18 -12,7 -12,-2 C-12,-9 -7,-14 0,-14 Z' fill='%233E6259'/%3E%3Ccircle cx='0' cy='-2' r='4.2' fill='%23F2EEE3'/%3E%3C/g%3E%3Cg transform='translate(52,4)'%3E%3Cpath d='M0,-14 C7,-14 12,-9 12,-2 C12,7 0,18 0,18 C0,18 -12,7 -12,-2 C-12,-9 -7,-14 0,-14 Z' fill='%23A63A2E'/%3E%3Ccircle cx='0' cy='-2' r='4.2' fill='%23F2EEE3'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E">
 <title>关口记录簿 · 大马 / 新加坡 天数统计</title>
 <link rel="manifest" href="manifest.json">
@@ -665,7 +695,7 @@
   说明：天数计算采用「出发日与返回日均计为整天」的简化方式，实际税务规则（例如马来西亚 182 天 / 新加坡 183 天居民门槛）可能有不同的计算细节。以上门槛数字仅供参考，不构成税务意见，具体请以马来西亚内陆税收局（LHDN）、新加坡税务局（IRAS）规定或专业税务顾问意见为准。
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
 (function(){
   const STORAGE_TRIPS_KEY = 'border-ledger:trips';
@@ -1295,7 +1325,7 @@
       items.push(
         '<div class="image-thumb-item">' +
           '<img class="image-thumb" src="' + dataURL + '" alt="已上传图片">' +
-          '<button type="button" class="image-thumb-remove" onclick="borderLedger.removeExistingImage(\'' + imgId + '\')" title="移除">×</button>' +
+          '<button type="button" class="image-thumb-remove" data-action="removeExistingImage" data-img-id="' + escapeHtml(imgId) + '" title="移除">×</button>' +
         '</div>'
       );
     });
@@ -1304,7 +1334,7 @@
         '<div class="image-thumb-item pending">' +
           '<img class="image-thumb" src="' + dataURL + '" alt="待上传图片">' +
           '<span class="thumb-size">' + Math.round(dataURL.length/1024) + 'KB</span>' +
-          '<button type="button" class="image-thumb-remove" onclick="borderLedger.removePendingImage(' + idx + ')" title="移除">×</button>' +
+          '<button type="button" class="image-thumb-remove" data-action="removePendingImage" data-idx="' + idx + '" title="移除">×</button>' +
         '</div>'
       );
     });
@@ -1319,6 +1349,18 @@
     removedExistingImageIds.add(imgId);
     renderImageThumbList();
   }
+
+  // event delegation: avoids inline onclick="" handlers so the page can run
+  // under a CSP with no 'unsafe-inline' in script-src
+  imageThumbList.addEventListener('click', (e)=>{
+    const btn = e.target.closest('[data-action]');
+    if(!btn || !imageThumbList.contains(btn)) return;
+    if(btn.dataset.action === 'removeExistingImage'){
+      removeExistingImageFromEdit(btn.dataset.imgId);
+    }else if(btn.dataset.action === 'removePendingImage'){
+      removePendingImage(Number(btn.dataset.idx));
+    }
+  });
 
   function resetImageFormState(){
     pendingNewImages = [];
@@ -1659,7 +1701,7 @@
 
       const otherList = Object.entries(d.otherBreakdown)
         .sort((a,b)=>b[1]-a[1])
-        .map(([name,days])=>`<span class="stamp other">${name} <span class="n">${days}</span> 天</span>`)
+        .map(([name,days])=>`<span class="stamp other">${escapeHtml(name)} <span class="n">${days}</span> 天</span>`)
         .join('');
 
       return `
@@ -1725,18 +1767,18 @@
       const d = daysInclusive(t.start, t.end);
       return `
         <tr>
-          <td data-label="目的地"><span class="tag ${destTagClass(t)}">${destLabel(t)}</span></td>
+          <td data-label="目的地"><span class="tag ${destTagClass(t)}">${escapeHtml(destLabel(t))}</span></td>
           <td data-label="出发">${t.start}</td>
           <td data-label="返回">${t.end}</td>
           <td data-label="天数">${d} 天</td>
           <td data-label="交通方式"><span class="transport-tag" title="${transportLabel(t)}">${transportIcon(t)}</span></td>
           <td data-label="路线">${t.route ? `<span class="route-text">${escapeHtml(t.route)}</span>` : '—'}</td>
           <td data-label="备注">${t.note ? escapeHtml(t.note) : '—'}</td>
-          <td data-label="图片">${(t.imageIds && t.imageIds.length > 0) ? `<button class="view-image-link" onclick="borderLedger.viewImage('${t.id}')">查看图片 (${t.imageIds.length})</button>` : '—'}</td>
+          <td data-label="图片">${(t.imageIds && t.imageIds.length > 0) ? `<button class="view-image-link" data-action="viewImage" data-trip-id="${escapeHtml(t.id)}">查看图片 (${t.imageIds.length})</button>` : '—'}</td>
           <td data-label="操作">
             <div class="row-actions">
-              <button onclick="borderLedger.edit('${t.id}')" title="编辑">✏️</button>
-              <button onclick="borderLedger.remove('${t.id}')" title="删除">🗑️</button>
+              <button data-action="editTrip" data-trip-id="${escapeHtml(t.id)}" title="编辑">✏️</button>
+              <button data-action="removeTrip" data-trip-id="${escapeHtml(t.id)}" title="删除">🗑️</button>
             </div>
           </td>
         </tr>
@@ -1751,6 +1793,17 @@
       </table>
     `;
   }
+
+  // event delegation: avoids inline onclick="" handlers so the page can run
+  // under a CSP with no 'unsafe-inline' in script-src
+  tripTableWrap.addEventListener('click', (e)=>{
+    const btn = e.target.closest('[data-action]');
+    if(!btn || !tripTableWrap.contains(btn)) return;
+    const id = btn.dataset.tripId;
+    if(btn.dataset.action === 'viewImage') viewTripImage(id);
+    else if(btn.dataset.action === 'editTrip') startEdit(id);
+    else if(btn.dataset.action === 'removeTrip') deleteTrip(id);
+  });
 
   function renderYearSelect(){
     const data = computeYearlyData();
@@ -2113,7 +2166,7 @@
 
     const rows = relevantTrips.map(({t, daysInYear})=>{
       return `<tr>
-        <td>${destLabelEn(t)}</td>
+        <td>${escapeHtml(destLabelEn(t))}</td>
         <td>${t.start}</td>
         <td>${t.end}</td>
         <td>${daysInYear} days</td>
@@ -2125,7 +2178,7 @@
 
     const otherListEn = Object.entries(otherBreakdown)
       .sort((a,b)=>b[1]-a[1])
-      .map(([name,days])=>`<span class="stamp other">${name} <span class="n">${days}</span> days</span>`)
+      .map(([name,days])=>`<span class="stamp other">${escapeHtml(name)} <span class="n">${days}</span> days</span>`)
       .join('');
 
     const myHit = myDays >= 182;
@@ -2420,14 +2473,6 @@
     preparePrintView(year);
     window.print();
   });
-
-  window.borderLedger = {
-    remove: deleteTrip,
-    edit: startEdit,
-    viewImage: viewTripImage,
-    removePendingImage,
-    removeExistingImage: removeExistingImageFromEdit
-  };
 
   function showStorageModeNote(){
     const note = document.getElementById('storageModeNote');
