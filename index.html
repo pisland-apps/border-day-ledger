@@ -23,7 +23,7 @@
 -->
 <meta http-equiv="Content-Security-Policy" content="
   default-src 'self';
-  script-src 'self' https://cdnjs.cloudflare.com 'sha256-isc6h/ki4NSrOv0DUHet2w+56C2fKu3tJBylz9dx9pQ=' 'sha256-kW+rtVzNXm+sKdyPJoGq4ZsDV5dBfAnIhWh8G1wif+k=';
+  script-src 'self' https://cdnjs.cloudflare.com 'sha256-owFBbsN0DO2qVybTAtCaxpL9/b/FcFDaPLVfIvf9gS4=' 'sha256-kW+rtVzNXm+sKdyPJoGq4ZsDV5dBfAnIhWh8G1wif+k=';
   style-src 'self' 'unsafe-inline';
   img-src 'self' data:;
   font-src 'self';
@@ -326,8 +326,27 @@
     background:#fff; border-radius:4px; padding:14px;
     max-width:90vw; max-height:90vh; display:flex; flex-direction:column; gap:10px;
     box-shadow:var(--card-shadow);
+    box-sizing:border-box;
   }
-  .img-modal-box img{max-width:100%; max-height:70vh; display:block; border-radius:2px; margin:0 auto;}
+  /* Wrapper takes the remaining flex space between the nav buttons and clips
+     an enlarged/panned image; min-width:0 is required so a large intrinsic
+     image size can't force the row (and the nav buttons) wider than the
+     viewport on mobile. */
+  .img-modal-imgwrap{
+    position:relative; flex:1 1 auto; min-width:0; min-height:0;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden; touch-action:none;
+  }
+  .img-modal-box img{
+    max-width:100%; max-height:70vh; display:block; border-radius:2px; margin:0 auto;
+    object-fit:contain; user-select:none; -webkit-user-drag:none;
+    transform-origin:center center; touch-action:none;
+  }
+  .img-modal-box img.zoomed{cursor:grab; max-width:none; max-height:none;}
+  .img-modal-hint{
+    font-family:var(--sans); font-size:10.5px; color:var(--grey-text);
+    text-align:center; opacity:0.75;
+  }
   .img-modal-close{
     font-family:var(--sans); font-size:12px; color:var(--ink-soft);
     background:none; border:1px solid var(--gold-line); border-radius:3px;
@@ -343,6 +362,16 @@
   .img-modal-nav:hover{border-color:var(--stamp); color:var(--stamp);}
   .img-modal-nav:disabled{opacity:0.3; cursor:default;}
   .img-modal-nav:disabled:hover{border-color:var(--gold-line); color:var(--ink-soft);}
+
+  /* ---- Small build-version badge, bottom-right, visible even on the lock
+     screen (z-index above .lock-overlay's 2000) before the user unlocks. ---- */
+  .version-badge{
+    position:fixed; right:6px; bottom:6px; z-index:3000;
+    font-family:var(--mono); font-size:9.5px; color:var(--grey-text);
+    background:rgba(255,255,255,0.72); border:1px solid var(--gold-line);
+    border-radius:3px; padding:2px 6px; opacity:0.8;
+    pointer-events:none; user-select:none;
+  }
 
   .empty-state{
     text-align:center;
@@ -526,11 +555,17 @@
         <label>&nbsp;</label>
         <button type="button" class="btn ghost" id="bioToggleBtn">指纹 / Face ID 解锁</button>
       </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button type="button" class="btn ghost" id="infoNoteBtn">ℹ️ 说明</button>
+      </div>
       <div class="save-status" id="saveStatus"></div>
     </div>
-    <div id="storageModeNote" style="font-size:11.5px; color:var(--grey-text); margin-top:10px; display:none;"></div>
-    <div style="font-size:11.5px; color:var(--grey-text); margin-top:10px;">
-      🔒 本工具所有数据均使用密码派生的密钥加密保存（PBKDF2 + AES-GCM）。密码仅保存在本次会话的内存中，不会被存储。指纹/Face ID 解锁只是密码的便捷入口（需要 iOS 18+ / 较新版 Android Chrome）——换设备或清除浏览器数据后，仍需用密码解锁。
+    <div id="infoNoteBox" style="font-size:11.5px; color:var(--grey-text); margin-top:10px; display:none;">
+      <div id="storageModeNote" style="display:none;"></div>
+      <div style="margin-top:8px;">
+        🔒 本工具所有数据均使用密码派生的密钥加密保存（PBKDF2 + AES-GCM）。密码仅保存在本次会话的内存中，不会被存储。指纹/Face ID 解锁只是密码的便捷入口（需要 iOS 18+ / 较新版 Android Chrome）——换设备或清除浏览器数据后，仍需用密码解锁。
+      </div>
     </div>
   </section>
 
@@ -565,12 +600,20 @@
         <div style="font-size:11px; color:var(--stamp); margin-top:2px;">明文备份不含密码保护，请妥善保管</div>
       </div>
       <div class="field">
-        <label for="printYearSelect">选择年份</label>
-        <select id="printYearSelect"></select>
-      </div>
-      <div class="field">
         <label>&nbsp;</label>
-        <button type="button" class="btn" id="printBtn">打印该年度记录（英文报告）</button>
+        <button type="button" class="btn" id="printToggleBtn">🖨️ 打印</button>
+      </div>
+    </div>
+    <div id="printSection" style="display:none; margin-top:12px; padding-top:12px; border-top:1px dashed var(--gold-line);">
+      <div class="settings-row">
+        <div class="field">
+          <label for="printYearSelect">选择年份</label>
+          <select id="printYearSelect"></select>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button type="button" class="btn" id="printBtn">打印该年度记录（英文报告）</button>
+        </div>
       </div>
     </div>
     <div id="storageMeterWrap" style="margin-top:16px; padding-top:14px; border-top:1px dashed var(--gold-line);">
@@ -581,21 +624,23 @@
       <div id="storageMeterSub" style="font-family:var(--mono); font-size:11px; color:var(--grey-text); margin-top:4px;"></div>
     </div>
     <div style="margin-top:16px; padding-top:14px; border-top:1px dashed var(--stamp-soft);">
-      <div style="font-size:12px; color:var(--stamp); font-family:var(--sans); font-weight:600; margin-bottom:8px;">
+      <button type="button" class="btn ghost" id="archiveToggleBtn" style="border-color:var(--stamp-soft); color:var(--stamp); font-weight:600;">
         空间不够用？按年归档
-      </div>
-      <div class="settings-row">
-        <div class="field">
-          <label for="archiveYearSelect">选择要归档的年份</label>
-          <select id="archiveYearSelect"></select>
+      </button>
+      <div id="archiveSection" style="display:none; margin-top:12px;">
+        <div class="settings-row">
+          <div class="field">
+            <label for="archiveYearSelect">选择要归档的年份</label>
+            <select id="archiveYearSelect"></select>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button type="button" class="btn ghost" id="archiveBtn" style="border-color:var(--stamp-soft); color:var(--stamp);">导出该年并删除</button>
+          </div>
         </div>
-        <div class="field">
-          <label>&nbsp;</label>
-          <button type="button" class="btn ghost" id="archiveBtn" style="border-color:var(--stamp-soft); color:var(--stamp);">导出该年并删除</button>
+        <div style="font-size:11px; color:var(--grey-text); margin-top:6px;">
+          会先下载该年份的完整备份（含图片），确认保存好后再从本地删除释放空间。以后需要可以用上面「导入 JSON」拿回来。
         </div>
-      </div>
-      <div style="font-size:11px; color:var(--grey-text); margin-top:6px;">
-        会先下载该年份的完整备份（含图片），确认保存好后再从本地删除释放空间。以后需要可以用上面「导入 JSON」拿回来。
       </div>
     </div>
   </section>
@@ -683,13 +728,18 @@
       <span id="imgModalCounter" style="font-family:var(--mono); font-size:12px; color:var(--grey-text);"></span>
       <button class="img-modal-close" id="imgModalCloseBtn">关闭</button>
     </div>
-    <div style="position:relative; display:flex; align-items:center; gap:8px;">
+    <div style="position:relative; display:flex; align-items:center; gap:8px; min-width:0;">
       <button class="img-modal-nav" id="imgModalPrevBtn" title="上一张">‹</button>
-      <img id="imgModalImg" src="" alt="行程参考图片">
+      <div class="img-modal-imgwrap" id="imgModalImgWrap">
+        <img id="imgModalImg" src="" alt="行程参考图片">
+      </div>
       <button class="img-modal-nav" id="imgModalNextBtn" title="下一张">›</button>
     </div>
+    <div class="img-modal-hint" id="imgModalHint">双指捏合可放大 · 放大后可拖动查看</div>
   </div>
 </div>
+
+<div class="version-badge" id="versionBadge"></div>
 
 <div class="footer-note">
   说明：天数计算采用「出发日与返回日均计为整天」的简化方式，实际税务规则（例如马来西亚 182 天 / 新加坡 183 天居民门槛）可能有不同的计算细节。以上门槛数字仅供参考，不构成税务意见，具体请以马来西亚内陆税收局（LHDN）、新加坡税务局（IRAS）规定或专业税务顾问意见为准。
@@ -698,6 +748,33 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
 (function(){
+  // ---------------------------------------------------------------------
+  // Build version — shown in the small badge fixed to the bottom-right of
+  // the screen (visible even before unlocking). This is purely a display
+  // label so you can eyeball "did my deploy actually land" and tell the
+  // browser apart from what's on disk; it is NOT read by any update logic.
+  //
+  // It does NOT sync automatically with CACHE_NAME in sw.js — they live in
+  // different files. Bump BOTH by hand on every deploy that changes any
+  // shipped file:
+  //   - here: APP_VERSION / APP_VERSION_DATE
+  //   - sw.js: CACHE_NAME (e.g. ...-cache-v8 -> ...-cache-v9)
+  // See the reminder comment next to CACHE_NAME in sw.js, and the deploy
+  // checklist in README.md.
+  //
+  // If the badge doesn't match what you expect after deploying, that's a
+  // signal the browser is still running old cached code — hard refresh
+  // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
+  // rather than assuming the deploy didn't work.
+  // ---------------------------------------------------------------------
+  const APP_VERSION = 'v8';
+  const APP_VERSION_DATE = '2026-08-08';
+
+  // Set immediately (not gated behind unlock) so the badge is visible on
+  // the lock screen before the password is entered.
+  const versionBadgeEl = document.getElementById('versionBadge');
+  if(versionBadgeEl) versionBadgeEl.textContent = APP_VERSION + ' · ' + APP_VERSION_DATE;
+
   const STORAGE_TRIPS_KEY = 'border-ledger:trips';
   const STORAGE_SETTINGS_KEY = 'border-ledger:settings';
 
@@ -1388,17 +1465,95 @@
     imgModalNextBtn.style.display = multi ? 'flex' : 'none';
     imgModalPrevBtn.disabled = modalIndex <= 0;
     imgModalNextBtn.disabled = modalIndex >= modalImages.length - 1;
+    resetImageZoom();
   }
   function closeImageModal(){
     imgModalOverlay.classList.remove('open');
     imgModalImg.src = '';
     modalImages = [];
+    resetImageZoom();
   }
   imgModalPrevBtn.addEventListener('click', ()=>{ if(modalIndex > 0){ modalIndex--; updateModalView(); } });
   imgModalNextBtn.addEventListener('click', ()=>{ if(modalIndex < modalImages.length - 1){ modalIndex++; updateModalView(); } });
   imgModalCloseBtn.addEventListener('click', closeImageModal);
   imgModalOverlay.addEventListener('click', (e)=>{
     if(e.target === imgModalOverlay) closeImageModal();
+  });
+
+  // -----------------------------------------------------------------------
+  // Pinch-to-zoom for the image viewer (two-finger gesture on mobile, with
+  // drag-to-pan once zoomed). Fixes two mobile issues:
+  //   1. an oversized source image could stretch the flex row wider than
+  //      the viewport and push the prev/next buttons off-screen — solved
+  //      above by wrapping the <img> in .img-modal-imgwrap (min-width:0,
+  //      overflow:hidden) so the image is always clipped to the available
+  //      space instead of resizing its siblings;
+  //   2. there was no way to enlarge a photo to read fine print — solved
+  //      here with a standard two-pointer pinch gesture.
+  // -----------------------------------------------------------------------
+  const imgModalImgWrap = document.getElementById('imgModalImgWrap');
+  const imgModalHint = document.getElementById('imgModalHint');
+  let zoomScale = 1, zoomX = 0, zoomY = 0;
+  const ZOOM_MIN = 1, ZOOM_MAX = 4;
+  let pinchStartDist = 0, pinchStartScale = 1;
+  let panStartX = 0, panStartY = 0, panOriginX = 0, panOriginY = 0, isPanning = false;
+  const activePointers = new Map();
+
+  function applyZoomTransform(){
+    imgModalImg.style.transform = 'translate(' + zoomX + 'px,' + zoomY + 'px) scale(' + zoomScale + ')';
+    imgModalImg.classList.toggle('zoomed', zoomScale > 1.01);
+  }
+  function resetImageZoom(){
+    zoomScale = 1; zoomX = 0; zoomY = 0; isPanning = false;
+    activePointers.clear();
+    applyZoomTransform();
+  }
+  function pointerDist(pts){
+    const a = pts[0], b = pts[1];
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  }
+  imgModalImgWrap.addEventListener('pointerdown', (e)=>{
+    if(!imgModalImg.src) return;
+    activePointers.set(e.pointerId, e);
+    imgModalImgWrap.setPointerCapture(e.pointerId);
+    if(activePointers.size === 2){
+      pinchStartDist = pointerDist([...activePointers.values()]);
+      pinchStartScale = zoomScale;
+    } else if(activePointers.size === 1 && zoomScale > 1.01){
+      isPanning = true;
+      panStartX = e.clientX; panStartY = e.clientY;
+      panOriginX = zoomX; panOriginY = zoomY;
+    }
+  });
+  imgModalImgWrap.addEventListener('pointermove', (e)=>{
+    if(!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, e);
+    if(activePointers.size === 2){
+      const dist = pointerDist([...activePointers.values()]);
+      if(pinchStartDist > 0){
+        zoomScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, pinchStartScale * (dist / pinchStartDist)));
+        applyZoomTransform();
+      }
+    } else if(isPanning && zoomScale > 1.01){
+      zoomX = panOriginX + (e.clientX - panStartX);
+      zoomY = panOriginY + (e.clientY - panStartY);
+      applyZoomTransform();
+    }
+  });
+  function endPointer(e){
+    activePointers.delete(e.pointerId);
+    if(activePointers.size < 2) pinchStartDist = 0;
+    if(activePointers.size === 0){
+      isPanning = false;
+      if(zoomScale < 1.01){ zoomScale = 1; zoomX = 0; zoomY = 0; applyZoomTransform(); }
+    }
+  }
+  imgModalImgWrap.addEventListener('pointerup', endPointer);
+  imgModalImgWrap.addEventListener('pointercancel', endPointer);
+  imgModalImgWrap.addEventListener('pointerleave', (e)=>{ if(activePointers.has(e.pointerId)) endPointer(e); });
+  // Double-click/double-tap as a quick desktop-friendly toggle too.
+  imgModalImgWrap.addEventListener('dblclick', ()=>{
+    if(zoomScale > 1.01){ resetImageZoom(); } else { zoomScale = 2; applyZoomTransform(); }
   });
 
   function flashStatus(msg){
@@ -2473,6 +2628,14 @@
     preparePrintView(year);
     window.print();
   });
+  document.getElementById('printToggleBtn').addEventListener('click', ()=>{
+    const section = document.getElementById('printSection');
+    section.style.display = (section.style.display === 'none') ? 'block' : 'none';
+  });
+  document.getElementById('archiveToggleBtn').addEventListener('click', ()=>{
+    const section = document.getElementById('archiveSection');
+    section.style.display = (section.style.display === 'none') ? 'block' : 'none';
+  });
 
   function showStorageModeNote(){
     const note = document.getElementById('storageModeNote');
@@ -2684,6 +2847,14 @@
     await runUnlockFlow();
     lockOverlayEl.classList.remove('open');
     await loadAll();
+  });
+
+  document.getElementById('infoNoteBtn').addEventListener('click', ()=>{
+    const box = document.getElementById('infoNoteBox');
+    const btn = document.getElementById('infoNoteBtn');
+    const willShow = box.style.display === 'none';
+    box.style.display = willShow ? 'block' : 'none';
+    btn.textContent = willShow ? '收起说明' : 'ℹ️ 说明';
   });
 
   (async function init(){
