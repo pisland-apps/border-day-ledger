@@ -34,7 +34,7 @@
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v15';
+  const APP_VERSION = 'v16';
   const APP_VERSION_DATE = '2026-08-09';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
@@ -981,13 +981,45 @@
   const SCROLL_GUARD_PX = 400;
   let scrollGuardPushed = false;
   let ignoreNextPopstateForScrollGuard = false;
+  // True while our own scrollTo({behavior:'smooth'}) animation below is in
+  // flight. Without this, the animation's own 'scroll' events fire while
+  // scrollY is still >SCROLL_GUARD_PX (mid-animation) and race with
+  // syncScrollGuard: it sees "scrolled down, no guard installed" and pushes
+  // a fresh entry, which then gets retired again a moment later as the
+  // animation finishes crossing back under the threshold. Each back press
+  // was quietly doing 1 real pop + 1 extra push + 1 extra pop in rapid
+  // succession — enough of those in a short window and the browser's
+  // built-in pushState/back() rate limit kicks in and silently starts
+  // dropping the calls, which looked like "works once, then stops working
+  // at all." Freezing the guard for the duration of the animation removes
+  // that extra push/pop pair entirely.
+  let autoScrolling = false;
+
+  function scrollToTopGuarded(){
+    autoScrolling = true;
+    let settled = false;
+    const finish = () => {
+      if(settled) return;
+      settled = true;
+      autoScrolling = false;
+    };
+    // 'scrollend' (Chrome 114+, Safari 18.2+) fires right as the animation
+    // actually finishes; the timeout is a fallback for browsers that don't
+    // support it yet (older iOS Safari) so autoScrolling can't get stuck on.
+    window.addEventListener('scrollend', finish, { once:true });
+    setTimeout(finish, 700);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 
   function syncScrollGuard(){
     // Don't install/retire the guard while the image modal or lock screen
     // owns the history stack / the screen — let their own handling run,
-    // untouched, instead of the two stepping on each other.
+    // untouched, instead of the two stepping on each other. Same for our
+    // own scroll-to-top animation, which must not be treated as a fresh
+    // user scroll (see the autoScrolling comment above).
     if(imgModalOverlay.classList.contains('open')) return;
     if(lockOverlayEl && lockOverlayEl.classList.contains('open')) return;
+    if(autoScrolling) return;
 
     if(window.scrollY > SCROLL_GUARD_PX && !scrollGuardPushed){
       history.pushState({ scrollGuard: true }, '');
@@ -1005,7 +1037,7 @@
     if(ignoreNextPopstateForScrollGuard){ ignoreNextPopstateForScrollGuard = false; return; }
     if(scrollGuardPushed){
       scrollGuardPushed = false;
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollToTopGuarded();
     }
   });
   imgModalPrevBtn.addEventListener('click', ()=>{ if(modalIndex > 0){ modalIndex--; updateModalView(); } });
