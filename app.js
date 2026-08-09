@@ -34,7 +34,7 @@
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v12';
+  const APP_VERSION = 'v13';
   const APP_VERSION_DATE = '2026-08-09';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
@@ -922,7 +922,10 @@
       if(token !== pdfRenderToken) return; // user moved on before this resolved
 
       imgModalPdfWrap.innerHTML = '';
-      const containerWidth = Math.min(imgModalPdfWrap.clientWidth || 600, 640);
+      // clientWidth is only trustworthy once the CSS min-width on
+      // .img-modal-pdfwrap has taken effect; floor it at 320 as a second
+      // line of defense in case it's ever read at 0 before layout settles.
+      const containerWidth = Math.min(Math.max(imgModalPdfWrap.clientWidth, 320) || 600, 640);
       for(let pageNum=1; pageNum<=pdf.numPages; pageNum++){
         const page = await pdf.getPage(pageNum);
         if(token !== pdfRenderToken) return;
