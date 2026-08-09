@@ -34,7 +34,7 @@
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v14';
+  const APP_VERSION = 'v15';
   const APP_VERSION_DATE = '2026-08-09';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
@@ -962,8 +962,51 @@
       if(!fromPopstate) history.back();
     }
   }
+  // ---------------------------------------------------------------------
+  // Mobile hardware/gesture back-button handling for a long, scrolled-down
+  // trip list. If you've scrolled far down (e.g. searching for an old
+  // entry) and hit back, it used to quit the whole PWA immediately — same
+  // "only entry in the history stack" problem as the image modal above —
+  // which then meant scrolling all the way back to the top by hand.
+  //
+  // Fix: same dummy-history-entry trick as the image modal. Once scrolled
+  // more than SCROLL_GUARD_PX past the top, push one extra history entry.
+  // The first back press pops that entry (caught via popstate below) and
+  // scrolls to top instead of exiting; a second press (nothing left of
+  // ours to pop) exits/navigates back normally. If the user scrolls back
+  // to the top themselves without ever pressing back, the dummy entry is
+  // retired quietly via history.back() so it doesn't sit there as a stale
+  // entry the next real back press would have to eat through first.
+  // ---------------------------------------------------------------------
+  const SCROLL_GUARD_PX = 400;
+  let scrollGuardPushed = false;
+  let ignoreNextPopstateForScrollGuard = false;
+
+  function syncScrollGuard(){
+    // Don't install/retire the guard while the image modal or lock screen
+    // owns the history stack / the screen — let their own handling run,
+    // untouched, instead of the two stepping on each other.
+    if(imgModalOverlay.classList.contains('open')) return;
+    if(lockOverlayEl && lockOverlayEl.classList.contains('open')) return;
+
+    if(window.scrollY > SCROLL_GUARD_PX && !scrollGuardPushed){
+      history.pushState({ scrollGuard: true }, '');
+      scrollGuardPushed = true;
+    } else if(window.scrollY <= SCROLL_GUARD_PX && scrollGuardPushed){
+      scrollGuardPushed = false;
+      ignoreNextPopstateForScrollGuard = true;
+      history.back();
+    }
+  }
+  window.addEventListener('scroll', ()=>{ requestAnimationFrame(syncScrollGuard); }, { passive:true });
+
   window.addEventListener('popstate', ()=>{
-    if(imgModalOverlay.classList.contains('open')) closeImageModal(true);
+    if(imgModalOverlay.classList.contains('open')){ closeImageModal(true); return; }
+    if(ignoreNextPopstateForScrollGuard){ ignoreNextPopstateForScrollGuard = false; return; }
+    if(scrollGuardPushed){
+      scrollGuardPushed = false;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   });
   imgModalPrevBtn.addEventListener('click', ()=>{ if(modalIndex > 0){ modalIndex--; updateModalView(); } });
   imgModalNextBtn.addEventListener('click', ()=>{ if(modalIndex < modalImages.length - 1){ modalIndex++; updateModalView(); } });
