@@ -4,16 +4,24 @@
 // sha256 hash to keep in sync — same pattern as the sibling tax-tracker app.
 // See README.md for why this change was made (a CSP hash mismatch after
 // deploying to GitHub Pages silently broke every button on the page).
+//
+// pdf.js (pdfjs-dist 6.2.108) is ESM-only as of v4+ — there is no more
+// global-script build, so this file itself must be loaded as
+// <script type="module" src="app.js"> (see index.html) and pdf.js is
+// imported directly instead of read off window.pdfjsLib. The import must
+// stay at true top level (outside the IIFE below) — that's a hard
+// requirement of ES module syntax.
+import * as pdfjsLib from './lib/pdf.min.mjs';
 
 (function(){
-  // pdf.js worker — vendored locally at ./lib/pdf.worker.min.js (same
-  // pdfjs-dist 3.11.174 package as ./lib/pdf.min.js loaded above). Used by
-  // the attachment viewer to render PDF pages onto <canvas> instead of
+  // pdf.js worker — vendored locally at ./lib/pdf.worker.min.mjs (same
+  // pdfjs-dist 6.2.108 package as ./lib/pdf.min.mjs imported above). Used
+  // by the attachment viewer to render PDF pages onto <canvas> instead of
   // relying on the browser's own PDF handling, which can silently trigger
   // a download or render blank depending on the browser's PDF setting.
-  if(window.pdfjsLib){
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
-  }
+  // pdf.js detects the .mjs extension and spins the worker up as a module
+  // worker automatically — no extra options needed here.
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.mjs';
 
   // ---------------------------------------------------------------------
   // Build version — shown in the small badge fixed to the bottom-right of
@@ -34,8 +42,8 @@
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v16';
-  const APP_VERSION_DATE = '2026-08-09';
+  const APP_VERSION = 'v17';
+  const APP_VERSION_DATE = '2026-08-11';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
   // the lock screen before the password is entered.
