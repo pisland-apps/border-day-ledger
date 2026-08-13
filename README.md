@@ -133,5 +133,5 @@ upgrading, which will only succeed on devices with real PRF support.
 
 ## Current versions
 
-- `APP_VERSION`: `v18` (`app.js`)
-- `CACHE_NAME`: `border-day-ledger-cache-v18` (`sw.js`)
+- `APP_VERSION`: `v19` (`app.js`)
+- `CACHE_NAME`: `border-day-ledger-cache-v19` (`sw.js`)
