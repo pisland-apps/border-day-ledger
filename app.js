@@ -2244,6 +2244,58 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   const lockCancelBtn = document.getElementById('lockCancelBtn');
   const lockFootnoteEl = document.getElementById('lockFootnote');
 
+  // ---------------------------------------------------------------------
+  // On-screen numpad for lockPass1/lockPass2. Goal: on phones/tablets, tapping
+  // into the passcode field should NOT pop up the device's own keyboard —
+  // the big on-screen numpad is the intended input method there. Two layers
+  // of defense, since mobile browsers don't all honor the same hint:
+  //   1. inputmode="none" — the standard signal that this field supplies
+  //      its own on-screen input control (per the HTML spec).
+  //   2. On coarse-pointer (touch) devices only, also set `readonly` as a
+  //      belt-and-braces fallback for browsers that ignore #1. readonly
+  //      still allows focus, caret, and programmatic value changes (which
+  //      is all the numpad buttons need) — it only blocks the OS keyboard.
+  // Desktop/mouse users are left untouched so physical-keyboard typing
+  // keeps working exactly as before. A "改用文字键盘输入" link is offered
+  // as an escape hatch for anyone with a legacy non-numeric passcode who
+  // needs their real keyboard on a touch device.
+  const lockNumpadEl = document.getElementById('lockNumpad');
+  const numpadKbdToggle = document.getElementById('numpadKbdToggle');
+  const numpadBackspace = document.getElementById('numpadBackspace');
+  const prefersOwnKeypad = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  let activeLockInput = lockPass1El;
+  [lockPass1El, lockPass2El].forEach(el=>{
+    el.addEventListener('focus', ()=>{ activeLockInput = el; });
+  });
+  function setNumericEntryMode(on){
+    [lockPass1El, lockPass2El].forEach(el=>{
+      if(on){
+        el.setAttribute('inputmode', 'none');
+        if(prefersOwnKeypad) el.setAttribute('readonly', 'readonly');
+      } else {
+        el.removeAttribute('inputmode');
+        el.removeAttribute('readonly');
+      }
+    });
+    lockNumpadEl.style.display = on ? 'grid' : 'none';
+    numpadKbdToggle.textContent = on ? '⌨ 改用文字键盘输入' : '🔢 改用数字键盘';
+  }
+  numpadKbdToggle.addEventListener('click', ()=>{
+    const nowOn = lockNumpadEl.style.display === 'none';
+    setNumericEntryMode(nowOn);
+    activeLockInput.focus();
+  });
+  function numpadEdit(mutate){
+    const el = activeLockInput;
+    el.value = mutate(el.value);
+    el.dispatchEvent(new Event('input', { bubbles:true }));
+    el.focus();
+  }
+  lockNumpadEl.querySelectorAll('.numpad-key[data-key]').forEach(btn=>{
+    btn.addEventListener('click', ()=> numpadEdit(v => v + btn.dataset.key));
+  });
+  numpadBackspace.addEventListener('click', ()=> numpadEdit(v => v.slice(0, -1)));
+
   function showPassPrompt(opts){
     return new Promise((resolve)=>{
       lockTitleEl.textContent = opts.title || '';
@@ -2256,6 +2308,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       lockCancelBtn.style.display = opts.cancelable ? 'inline-block' : 'none';
       lockSubmitBtn.textContent = opts.submitLabel || '确定';
       lockBioBtn.style.display = opts.bioButton ? 'block' : 'none';
+      activeLockInput = lockPass1El;
+      setNumericEntryMode(true);
       lockFootnoteEl.innerHTML = '';
       if(opts.showForgotLink){
         const a = document.createElement('a');
