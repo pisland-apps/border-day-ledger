@@ -42,8 +42,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v19';
-  const APP_VERSION_DATE = '2026-08-13';
+  const APP_VERSION = 'v20';
+  const APP_VERSION_DATE = '2026-08-14';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
   // the lock screen before the password is entered.
@@ -705,9 +705,19 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   }
 
   // used when importing JSON backups — accepts either kind of attachment
-  // data URL, rejecting anything else that might have ended up in the file
+  // data URL, rejecting anything else that might have ended up in the file.
+  // SECURITY: validates the FULL string, not just the prefix — a prefix-only
+  // check (s.startsWith('data:image')) would let a crafted backup file smuggle
+  // extra characters after the base64 payload (e.g. a closing quote followed by
+  // an HTML attribute) straight through import. That string later gets
+  // concatenated unescaped into an <img src="..."> attribute in
+  // attachmentThumbMarkup() below, so a malformed value here becomes markup
+  // injection in the attachment thumbnail list. The regex requires the whole
+  // string to be `data:<image or pdf mime>;base64,<valid base64 chars>` with
+  // nothing else allowed after it.
+  const ATTACHMENT_DATA_URL_RE = /^data:(image\/[a-z0-9.+-]+|application\/pdf);base64,[A-Za-z0-9+/]+={0,2}$/i;
   function isSupportedAttachmentDataURL(s){
-    return typeof s === 'string' && (s.startsWith('data:image') || s.startsWith('data:application/pdf'));
+    return typeof s === 'string' && ATTACHMENT_DATA_URL_RE.test(s);
   }
 
   // PDFs are stored as-is (no client-side compression available like the
@@ -795,9 +805,15 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   });
 
   function attachmentThumbMarkup(dataURL, altText){
+    // dataURL is escapeHtml()'d here as defense-in-depth on top of the
+    // ATTACHMENT_DATA_URL_RE validation at import time (see
+    // isSupportedAttachmentDataURL above) — a legitimate base64 data URL never
+    // contains any of the characters escapeHtml() touches, so this is a no-op
+    // for real attachments and only matters if a malformed value ever reaches
+    // this function some other way.
     return isPdfDataURL(dataURL)
       ? '<div class="pdf-thumb-icon">📄<span>PDF</span></div>'
-      : '<img class="image-thumb" src="' + dataURL + '" alt="' + altText + '">';
+      : '<img class="image-thumb" src="' + escapeHtml(dataURL) + '" alt="' + altText + '">';
   }
 
   function renderImageThumbList(){
