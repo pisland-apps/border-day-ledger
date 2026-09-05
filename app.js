@@ -42,8 +42,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v20';
-  const APP_VERSION_DATE = '2026-08-14';
+  const APP_VERSION = 'v21';
+  const APP_VERSION_DATE = '2026-09-05';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
   // the lock screen before the password is entered.
@@ -1775,11 +1775,32 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       alert('这个加密备份文件格式无法识别。');
       return;
     }
+
+    // If this envelope was produced by the top-bar "保存" quick-save button
+    // (envelope.appLinked, see quickSaveEncryptedBackup above), its salt IS
+    // the current device's own lock-meta salt — so if the app is already
+    // unlocked with a matching sessionKey, decrypt straight away with no
+    // password prompt at all, same as restoring on the same device it was
+    // saved from.
+    if(envelope.appLinked && sessionKey){
+      try{
+        const iv = new Uint8Array(b64ToBuf(envelope.iv));
+        const ctBuf = b64ToBuf(envelope.ciphertext);
+        const ptBuf = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, sessionKey, ctBuf);
+        const text = new TextDecoder().decode(ptBuf);
+        const parsed = JSON.parse(text);
+        await processJSONImportPayload(parsed);
+        return;
+      }catch(e){ /* fall through to the normal passcode-prompt path below */ }
+    }
+
     let attempts = 0;
     while(attempts < 5){
       const pass = await showPassPrompt({
         title: '输入备份密码',
-        subtitle: '这是一份加密备份，请输入导出时设置的密码来解密。',
+        subtitle: envelope.appLinked
+          ? '这是通过顶部「保存」按钮生成的加密备份，请输入你的访问密码来解密。'
+          : '这是一份加密备份，请输入导出时设置的密码来解密。',
         cancelable: true, submitLabel: '解密并导入', minLength: 1
       });
       if(pass === null) return;
@@ -2487,13 +2508,109 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     }
   });
 
-  document.getElementById('lockNowBtn').addEventListener('click', async ()=>{
+  // Locks the app immediately (drops the in-memory session key and re-runs
+  // the unlock flow). Exposed as its own named function — rather than an
+  // inline listener — so both the top-bar lock button and any other future
+  // entry point can trigger the exact same behavior.
+  async function lockAppNow(){
     sessionKey = null;
+    closeSidebar();
     lockOverlayEl.classList.add('open');
     await runUnlockFlow();
     lockOverlayEl.classList.remove('open');
     await loadAll();
-  });
+  }
+  const topLockBtnEl = document.getElementById('topLockBtn');
+  if(topLockBtnEl) topLockBtnEl.addEventListener('click', lockAppNow);
+
+  // ================= SIDEBAR NAVIGATION DRAWER =================
+  // Mobile: slide-in drawer opened via the hamburger button, closed via its
+  // own close button, the dark overlay, or the Escape key. Desktop (>=768px)
+  // shows it as a persistent rail instead — see the min-width:768px media
+  // query in <style> — so open/closeSidebar() only have a visible effect on
+  // narrow viewports; calling them on desktop is harmless (the CSS override
+  // makes .open a no-op there).
+  const sidebarDrawerEl = document.getElementById('sidebarDrawer');
+  const sidebarOverlayEl = document.getElementById('sidebarOverlay');
+  const hamburgerBtnEl = document.getElementById('hamburgerBtn');
+  const sidebarCloseBtnEl = document.getElementById('sidebarCloseBtn');
+
+  function openSidebar(){
+    if(!sidebarDrawerEl) return;
+    sidebarDrawerEl.classList.add('open');
+    if(sidebarOverlayEl) sidebarOverlayEl.classList.add('open');
+  }
+  function closeSidebar(){
+    if(!sidebarDrawerEl) return;
+    sidebarDrawerEl.classList.remove('open');
+    if(sidebarOverlayEl) sidebarOverlayEl.classList.remove('open');
+  }
+  if(hamburgerBtnEl) hamburgerBtnEl.addEventListener('click', openSidebar);
+  if(sidebarCloseBtnEl) sidebarCloseBtnEl.addEventListener('click', closeSidebar);
+  if(sidebarOverlayEl) sidebarOverlayEl.addEventListener('click', closeSidebar);
+  document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeSidebar(); });
+
+  // ================= TOP-BAR QUICK SAVE (always-encrypted backup) =================
+  // Mirrors the dashboard's own file-name/format for a JSON backup, but skips
+  // the "导出与打印" panel's separate backup-password prompt entirely: this
+  // always encrypts using the app's OWN access passcode (the same one used
+  // to unlock the app), automatically. If no passcode has been set up yet
+  // (shouldn't normally happen — the app requires one on first run — but
+  // handled defensively) it walks the person through setting one up first,
+  // then proceeds with the newly created passcode. There is no toggle or
+  // plaintext option here; that's intentional (see the button's title).
+  async function quickSaveEncryptedBackup(){
+    let meta = await getLockMeta();
+    if(!meta){
+      await runSetupFlow(); // sets up a passcode AND sets sessionKey
+      meta = await getLockMeta();
+      if(!meta) return; // user somehow bailed out; nothing we can do
+    }
+    if(!sessionKey){
+      alert('应用当前处于锁定状态，请先解锁后再保存。');
+      return;
+    }
+    flashStatus('正在保存（自动使用访问密码加密）…');
+    try{
+      const exportTrips = [];
+      for(const t of trips){
+        exportTrips.push(await tripToExportObject(t));
+      }
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        settings,
+        trips: exportTrips
+      };
+      const jsonText = JSON.stringify(payload, null, 2);
+
+      // Reuse the app's own lock-meta salt/iterations — sessionKey was
+      // itself derived from exactly this salt, so encrypting directly with
+      // sessionKey (rather than deriving a fresh one) keeps this envelope
+      // decryptable with nothing more than the person's normal access
+      // passcode, with no separate backup password to remember.
+      const iv = randomBytes(12);
+      const ctBuf = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, sessionKey, new TextEncoder().encode(jsonText));
+      const envelope = {
+        [EXPORT_ENVELOPE_MARKER]: true,
+        version: 1,
+        kdf: 'PBKDF2-SHA256',
+        iterations: meta.iterations || PBKDF2_ITERATIONS,
+        salt: meta.salt,
+        iv: bufToB64(iv),
+        originalFormat: 'json',
+        appLinked: true,
+        ciphertext: bufToB64(ctBuf)
+      };
+      const today = new Date().toISOString().slice(0,10);
+      triggerDownload(new Blob([JSON.stringify(envelope)], { type:'application/json' }), `border-day-ledger-${today}.encrypted.json`);
+      flashStatus('已保存（使用访问密码加密）');
+    }catch(e){
+      console.error('[border-ledger] quick save failed', e);
+      alert('保存失败，请稍后重试。');
+    }
+  }
+  const topSaveBtnEl = document.getElementById('topSaveBtn');
+  if(topSaveBtnEl) topSaveBtnEl.addEventListener('click', quickSaveEncryptedBackup);
 
   document.getElementById('infoNoteBtn').addEventListener('click', ()=>{
     const box = document.getElementById('infoNoteBox');
