@@ -42,8 +42,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v21';
-  const APP_VERSION_DATE = '2026-09-05';
+  const APP_VERSION = 'v26';
+  const APP_VERSION_DATE = '2026-09-20';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
   // the lock screen before the password is entered.
@@ -1018,6 +1018,15 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // that extra push/pop pair entirely.
   let autoScrolling = false;
 
+  // Add/Edit trip modal history state (see the modal block near the form
+  // code below). Declared here because popstate + syncScrollGuard read them.
+  let tripModalOpen = false;
+  let tripModalHistoryPushed = false;
+  // True for the instant after WE call history.back() to retire our own
+  // dummy entry, so the popstate that produces isn't mistaken for the user
+  // pressing Back (which would also wrongly trip the scroll-to-top guard).
+  let tripModalSelfPop = false;
+
   function scrollToTopGuarded(){
     autoScrolling = true;
     let settled = false;
@@ -1043,6 +1052,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     if(imgModalOverlay.classList.contains('open')) return;
     if(lockOverlayEl && lockOverlayEl.classList.contains('open')) return;
     if(autoScrolling) return;
+    if(tripModalOpen) return;
 
     if(window.scrollY > SCROLL_GUARD_PX && !scrollGuardPushed){
       history.pushState({ scrollGuard: true }, '');
@@ -1057,6 +1067,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
 
   window.addEventListener('popstate', ()=>{
     if(imgModalOverlay.classList.contains('open')){ closeImageModal(true); return; }
+    if(tripModalSelfPop){ tripModalSelfPop = false; return; }
+    if(tripModalOpen){ requestCloseTripModal(true); return; }
     if(ignoreNextPopstateForScrollGuard){ ignoreNextPopstateForScrollGuard = false; return; }
     if(scrollGuardPushed){
       scrollGuardPushed = false;
@@ -1224,8 +1236,23 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
 
   let editingId = null;
 
+  // Guards against a double-tap on 添加记录 creating two identical trips
+  // while image storage is still writing (the button is disabled too).
+  let tripSaving = false;
+  const submitBtnEl = document.getElementById('submitBtn');
   tripForm.addEventListener('submit', async (e)=>{
     e.preventDefault();
+    if(tripSaving) return;
+    tripSaving = true;
+    submitBtnEl.disabled = true;
+    try{ await saveTripFromForm(); }
+    finally{ tripSaving = false; submitBtnEl.disabled = false; }
+  });
+
+  async function saveTripFromForm(){
+    // Captured up front: closing the modal resets editingId to null, and the
+    // awaits below would otherwise read the wrong value.
+    const editId = editingId;
     const dest = destSelect.value;
     const otherName = otherNameInput.value.trim();
     const start = document.getElementById('startDate').value;
@@ -1238,8 +1265,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     if(new Date(end) < new Date(start)){ alert('返回日期不能早于出发日期'); return; }
     if(dest === 'OTHER' && !otherName){ alert('请填写国家名称'); return; }
 
-    if(editingId){
-      const idx = trips.findIndex(t => t.id === editingId);
+    if(editId){
+      const idx = trips.findIndex(t => t.id === editId);
       if(idx !== -1){
         // start from existing images minus any the user removed
         let imageIds = (trips[idx].imageIds || []).filter(id2 => !removedExistingImageIds.has(id2));
@@ -1247,20 +1274,23 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
         let failedCount = 0;
         for(const dataURL of pendingNewImages){
           const imgId = newImageId();
-          const ok = await setTripImage(editingId, imgId, dataURL);
+          const ok = await setTripImage(editId, imgId, dataURL);
           if(ok) imageIds.push(imgId); else failedCount++;
         }
-        trips[idx] = { id: editingId, dest, otherName: dest==='OTHER' ? otherName : '', start, end, note, transportMode, route, imageIds };
+        trips[idx] = { id: editId, dest, otherName: dest==='OTHER' ? otherName : '', start, end, note, transportMode, route, imageIds };
         saveTrips();
-        cancelEdit();
+        closeTripModal();
         render();
         // clean up storage for images the user actually removed, now that save succeeded
-        for(const imgId of removedIds) await deleteTripImage(editingId, imgId);
-        if(failedCount > 0) flashRetryableError(
-          `记录已更新，但 ${failedCount} 张图片未能保存` + (HAS_CLAUDE_STORAGE ? '' : '（本地浏览器存储空间可能已用满，试试删掉几张旧图片再传）'),
-          ()=>startEdit(editingId)
-        );
-        else flashStatus('已更新记录');
+        for(const imgId of removedIds) await deleteTripImage(editId, imgId);
+        if(failedCount > 0){
+          const msg = `记录已更新，但 ${failedCount} 张图片未能保存` + (HAS_CLAUDE_STORAGE ? '' : '（本地浏览器存储空间可能已用满，试试删掉几张旧图片再传）');
+          flashRetryableError(msg, ()=>startEdit(editId));
+          showToast('⚠️ ' + msg, { duration:7000, actionLabel:'重新编辑', action:()=>startEdit(editId) });
+        }else{
+          flashStatus('已更新记录');
+          showToast('已更新记录');
+        }
       }
     } else {
       const newId = 't' + Date.now() + Math.floor(Math.random()*1000);
@@ -1277,17 +1307,17 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
         start, end, note, transportMode, route, imageIds
       });
       saveTrips();
-      tripForm.reset();
-      otherNameField.style.display = 'none';
-      transportModeEl.value = 'AIR';
-      resetImageFormState();
+      closeTripModal();
       render();
-      if(failedCount > 0) flashRetryableError(
-        `行程已保存，但 ${failedCount} 张图片未能保存` + (HAS_CLAUDE_STORAGE ? '' : '（本地浏览器存储空间可能已用满，试试删掉几张旧图片再传）'),
-        ()=>startEdit(newId)
-      );
+      if(failedCount > 0){
+        const msg = `行程已保存，但 ${failedCount} 张图片未能保存` + (HAS_CLAUDE_STORAGE ? '' : '（本地浏览器存储空间可能已用满，试试删掉几张旧图片再传）');
+        flashRetryableError(msg, ()=>startEdit(newId));
+        showToast('⚠️ ' + msg, { duration:7000, actionLabel:'重新编辑', action:()=>startEdit(newId) });
+      }else{
+        showToast('已添加行程');
+      }
     }
-  });
+  }
 
   async function startEdit(id){
     const t = trips.find(x => x.id === id);
@@ -1303,18 +1333,22 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     routeDetailEl.value = t.route || '';
 
     resetImageFormState();
+    document.getElementById('formTitle').textContent = '编辑行程';
+    submitBtnEl.textContent = '保存修改';
+    // Open first, then load thumbnails: the modal appears instantly and the
+    // attachments fill in a moment later.
+    openTripModal();
     if(t.imageIds && t.imageIds.length > 0){
-      existingImagesForEdit = await getTripImages(t);
+      const imgs = await getTripImages(t);
+      // user may have closed the modal / switched trips while we were loading
+      if(editingId !== id) return;
+      existingImagesForEdit = imgs;
       renderImageThumbList();
     }
-
-    document.getElementById('formTitle').textContent = '编辑行程';
-    document.getElementById('submitBtn').textContent = '保存修改';
-    document.getElementById('cancelEditField').style.display = 'flex';
-    document.getElementById('tripForm').scrollIntoView({ behavior:'smooth', block:'center' });
   }
 
-  function cancelEdit(){
+  // Puts the form back to a blank "新增行程" state.
+  function resetTripForm(){
     editingId = null;
     tripForm.reset();
     otherNameField.style.display = 'none';
@@ -1322,14 +1356,136 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     routeDetailEl.value = '';
     resetImageFormState();
     document.getElementById('formTitle').textContent = '新增行程';
-    document.getElementById('submitBtn').textContent = '添加记录';
-    document.getElementById('cancelEditField').style.display = 'none';
+    submitBtnEl.textContent = '添加记录';
   }
 
-  document.getElementById('cancelEditBtn').addEventListener('click', cancelEdit);
+  // ---------------------------------------------------------------------
+  // Add / Edit trip MODAL (v22). The form used to be an inline card at the
+  // top of the page; it now lives in #tripModalOverlay and is opened by the
+  // floating ＋ button, the ＋ 新增行程 button in the trip list header, or
+  // the ✏️ button on a row (startEdit).
+  //
+  // Back-button handling follows the same dummy-history-entry pattern as the
+  // image viewer: opening pushes one entry so hardware/gesture Back closes
+  // the modal instead of leaving the PWA. Closing by any other route (X,
+  // 取消, save, Esc) retires that entry itself via history.back(), and
+  // tripModalSelfPop makes popstate ignore the pop that causes.
+  //
+  // Data-loss guards: a half-filled form is never thrown away silently —
+  // tapping the dark backdrop does nothing once anything has been typed,
+  // and X / 取消 / Esc / Back ask first.
+  // ---------------------------------------------------------------------
+  const tripModalOverlay = document.getElementById('tripModalOverlay');
+  const tripModalEl = document.getElementById('tripModal');
+  const tripModalBodyEl = document.getElementById('tripModalBody');
+  let tripFormDirty = false;
+  let tripModalReturnFocusEl = null;
+
+  function openTripModal(){
+    if(tripModalOpen) return;
+    tripModalReturnFocusEl = document.activeElement;
+    tripFormDirty = false;
+    tripModalOverlay.classList.add('open');
+    document.documentElement.classList.add('modal-open');
+    tripModalOpen = true;
+    history.pushState({ tripModal:true }, '');
+    tripModalHistoryPushed = true;
+    tripModalBodyEl.scrollTop = 0;
+    tripModalEl.focus({ preventScroll:true });
+  }
+
+  function openNewTripModal(){
+    if(tripModalOpen) return;
+    resetTripForm();
+    openTripModal();
+  }
+
+  // fromPopstate: true when Back already popped our history entry (so we
+  // must not call history.back() again).
+  function closeTripModal(fromPopstate){
+    if(!tripModalOpen) return;
+    tripModalOpen = false;
+    tripModalOverlay.classList.remove('open');
+    document.documentElement.classList.remove('modal-open');
+    resetTripForm();
+    tripFormDirty = false;
+    if(tripModalHistoryPushed){
+      tripModalHistoryPushed = false;
+      if(!fromPopstate){
+        tripModalSelfPop = true;
+        setTimeout(()=>{ tripModalSelfPop = false; }, 800); // safety net if popstate never fires
+        history.back();
+      }
+    }
+    const el = tripModalReturnFocusEl;
+    tripModalReturnFocusEl = null;
+    if(el && typeof el.focus === 'function' && document.contains(el)) el.focus({ preventScroll:true });
+  }
+
+  // Asks before discarding typed-in data; refuses to close mid-save.
+  function requestCloseTripModal(fromPopstate){
+    if(!tripModalOpen) return;
+    if(tripSaving || (tripFormDirty && !confirm('放弃未保存的内容？'))){
+      // Back already removed our entry — put it back so the next Back works.
+      if(fromPopstate) history.pushState({ tripModal:true }, '');
+      return;
+    }
+    closeTripModal(fromPopstate);
+  }
+
+  tripForm.addEventListener('input', ()=>{ tripFormDirty = true; });
+  tripForm.addEventListener('change', ()=>{ tripFormDirty = true; });
+  imageThumbList.addEventListener('click', ()=>{ tripFormDirty = true; });
+
+  document.getElementById('addTripFab').addEventListener('click', openNewTripModal);
+  document.getElementById('addTripBtn').addEventListener('click', openNewTripModal);
+  document.getElementById('tripModalCloseBtn').addEventListener('click', ()=>requestCloseTripModal(false));
+  document.getElementById('cancelEditBtn').addEventListener('click', ()=>requestCloseTripModal(false));
+  tripModalOverlay.addEventListener('click', (e)=>{
+    if(e.target === tripModalOverlay && !tripFormDirty) requestCloseTripModal(false);
+  });
+  document.addEventListener('keydown', (e)=>{
+    if(!tripModalOpen) return;
+    if(imgModalOverlay.classList.contains('open') || lockOverlayEl.classList.contains('open')) return;
+    if(e.key === 'Escape'){ e.preventDefault(); requestCloseTripModal(false); return; }
+    if(e.key === 'Tab'){
+      // keep keyboard focus inside the dialog
+      const f = Array.from(tripModalEl.querySelectorAll('button, input, select'))
+        .filter(x => !x.disabled && x.offsetParent !== null);
+      if(f.length === 0) return;
+      const first = f[0], last = f[f.length - 1];
+      if(e.shiftKey && (document.activeElement === first || document.activeElement === tripModalEl)){ e.preventDefault(); last.focus(); }
+      else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+    }
+  });
+
+  // Small bottom toast. The old flashStatus() text lives inside the settings
+  // drawer, which is hidden on phones — so saves gave no visible feedback
+  // there. Now that the form closes on save, that feedback matters.
+  const toastEl = document.getElementById('toast');
+  let toastTimer = null;
+  function hideToast(){ toastEl.classList.remove('show'); }
+  function showToast(msg, opts){
+    opts = opts || {};
+    toastEl.textContent = '';
+    const span = document.createElement('span');
+    span.textContent = msg;
+    toastEl.appendChild(span);
+    if(opts.action){
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = opts.actionLabel || '重试';
+      b.addEventListener('click', ()=>{ hideToast(); opts.action(); });
+      toastEl.appendChild(b);
+    }
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, opts.duration || 2200);
+  }
 
   async function deleteTrip(id){
-    if(editingId === id) cancelEdit();
+    if(!confirm('删除这条行程记录？附件也会一并删除，无法恢复。')) return;
+    if(editingId === id) closeTripModal();
     const t = trips.find(x => x.id === id);
     trips = trips.filter(x => x.id !== id);
     saveTrips();
@@ -1345,10 +1501,30 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     openImageModal(images.map(i => i.dataURL), 0);
   }
 
+  // Free-text country names ("VIETNAM", "vietnam", "越南") are grouped and
+  // shown under one Chinese name. Display/grouping only — the stored
+  // otherName is never rewritten.
+  const COUNTRY_ALIASES = {
+    'vietnam':'越南','viet nam':'越南','korea':'韩国','south korea':'韩国','南韩':'韩国',
+    'china':'中国','thailand':'泰国','japan':'日本','indonesia':'印尼','印度尼西亚':'印尼',
+    'philippines':'菲律宾','cambodia':'柬埔寨','laos':'老挝','myanmar':'缅甸','taiwan':'台湾',
+    'hong kong':'香港','hongkong':'香港','macau':'澳门','macao':'澳门','india':'印度','brunei':'文莱',
+    'australia':'澳洲','澳大利亚':'澳洲','usa':'美国','us':'美国','united states':'美国',
+    'uk':'英国','united kingdom':'英国','england':'英国'
+  };
+  function countryDisplayName(raw){
+    const n = (raw || '').trim();
+    if(!n) return '其他';
+    const k = n.toLowerCase().replace(/\s+/g, ' ');
+    if(COUNTRY_ALIASES[k]) return COUNTRY_ALIASES[k];
+    if(/^[A-Za-z .'-]+$/.test(n)) return n.toLowerCase().replace(/(^|[ -])([a-z])/g, (m, p, c)=>p + c.toUpperCase());
+    return n;
+  }
+
   function destLabel(trip){
     if(trip.dest === 'MY') return '马来西亚';
     if(trip.dest === 'SG') return '新加坡';
-    return trip.otherName || '其他';
+    return countryDisplayName(trip.otherName);
   }
 
   function destTagClass(trip){
@@ -1362,6 +1538,24 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     const s = new Date(startISO + 'T00:00:00Z');
     const e = new Date(endISO + 'T00:00:00Z');
     return Math.round((e - s) / 86400000) + 1;
+  }
+
+  function localTodayISO(){
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function addDaysISO(iso, n){
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+  // days of [startISO,endISO] that fall inside [rangeStartISO,rangeEndISO] (inclusive; ISO strings sort correctly)
+  function overlapDaysInRange(startISO, endISO, rangeStartISO, rangeEndISO){
+    const from = startISO > rangeStartISO ? startISO : rangeStartISO;
+    const to = endISO < rangeEndISO ? endISO : rangeEndISO;
+    if(to < from) return 0;
+    return daysInclusive(from, to);
   }
 
   function isLeap(y){ return (y%4===0 && y%100!==0) || y%400===0; }
@@ -1409,8 +1603,122 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       if(settings.base === 'SG') sgDays += remaining;
       else myDays += remaining;
 
-      return { year, totalDays, myDays, sgDays, otherDays, otherBreakdown };
+      // ---- v23: split the year into "already happened" and "not yet" ----
+      // Threshold checks use only the days that have actually happened
+      // (through today, inclusive). The rest of the year is an estimate:
+      // planned trips already entered + everything else at the base location.
+      // myDays/sgDays/otherDays above are unchanged (full-year, incl. estimate)
+      // because the print view still reads them.
+      const yStart = year + '-01-01', yEnd = year + '-12-31';
+      const today = localTodayISO();
+      const elapsedEnd = today < yStart ? null : (today < yEnd ? today : yEnd);
+      const elapsedDays = elapsedEnd ? daysInclusive(yStart, elapsedEnd) : 0;
+      const projectedDays = totalDays - elapsedDays;
+      const splitRange = (rs, re, span)=>{
+        const r = { my:0, sg:0, other:0, otherBreakdown:{} };
+        if(span <= 0) return r;
+        trips.forEach(t=>{
+          const d = overlapDaysInRange(t.start, t.end, rs, re);
+          if(d <= 0) return;
+          if(t.dest === 'MY') r.my += d;
+          else if(t.dest === 'SG') r.sg += d;
+          else {
+            r.other += d;
+            const key = countryDisplayName(t.otherName);
+            r.otherBreakdown[key] = (r.otherBreakdown[key] || 0) + d;
+          }
+        });
+        const rem = Math.max(0, span - r.my - r.sg - r.other);
+        if(settings.base === 'SG') r.sg += rem; else r.my += rem;
+        return r;
+      };
+      const elapsed = splitRange(yStart, elapsedEnd || yStart, elapsedDays);
+      const projected = splitRange(elapsedEnd ? addDaysISO(elapsedEnd, 1) : yStart, yEnd, projectedDays);
+
+      return { year, totalDays, myDays, sgDays, otherDays, otherBreakdown,
+               today, elapsedDays, projectedDays, elapsed, projected };
     });
+  }
+
+  // ---- Year card (v23) ----------------------------------------------
+  const YC_CHIP_COLORS = ['#7C9A4B','#9A4F8A','#B08A3E','#4F8CA3','#8C8A7E','#B0654F'];
+  function ycChipColor(name){
+    let h = 0;
+    for(let i=0; i<name.length; i++) h = (h*31 + name.charCodeAt(i)) >>> 0;
+    return YC_CHIP_COLORS[h % YC_CHIP_COLORS.length];
+  }
+
+  // Threshold state from ELAPSED days only.
+  function ycThresholdState(elapsedN, thr, d){
+    if(elapsedN >= thr) return { kind:'hit', over: elapsedN - thr };
+    if(d.elapsedDays === 0) return { kind:'notstarted' };
+    if(d.projectedDays === 0) return { kind:'missed' };
+    if(elapsedN + d.projectedDays < thr) return { kind:'impossible' };
+    return { kind:'open', need: thr - elapsedN };
+  }
+
+  function ycRowHTML(d, key){
+    const isMY = key === 'MY';
+    const cls = isMY ? 'my' : 'sg';
+    const name = isMY ? '马来西亚' : '新加坡';
+    const thr = isMY ? 182 : 183;
+    const e = isMY ? d.elapsed.my : d.elapsed.sg;
+    const p = isMY ? d.projected.my : d.projected.sg;
+    const st = ycThresholdState(e, thr, d);
+
+    let badge;
+    if(st.kind === 'hit') badge = `<span class="yc-badge hit ${cls}">✓ 已达 ${thr} 天门槛</span>`;
+    else if(st.kind === 'open') badge = `<span class="yc-badge">还差 ${st.need} 天到 ${thr} 门槛</span>`;
+    else if(st.kind === 'impossible') badge = '';   // deliberately shows nothing
+    else if(st.kind === 'missed') badge = `<span class="yc-badge">未达 ${thr} 天门槛</span>`;
+    else badge = `<span class="yc-badge">尚未开始</span>`;
+
+    const ePct = Math.min(100, e / d.totalDays * 100);
+    const pPct = Math.max(0, Math.min(100 - ePct, p / d.totalDays * 100));
+    const tPct = thr / d.totalDays * 100;
+    const over = st.kind === 'hit' ? `<span class="yc-over">已超过门槛 ${st.over} 天</span>` : '';
+    const isBase = settings.base === key;
+    // over-text + badge live in .yc-state: one line under the name on phones,
+    // flattened into the header line on wide cards (see the @container rule).
+    const state = (over || badge) ? `<div class="yc-state">${over}${badge}</div>` : '';
+
+    return `
+      <div class="yc-row">
+        <div class="yc-row-head">
+          <span class="yc-name"><i class="yc-dot ${cls}"></i>${name}${isBase ? '<span class="yc-basetag">常驻地</span>' : ''}</span>
+          <span class="yc-count"><b class="yc-n">${e}</b> / ${thr} 天</span>
+          ${state}
+        </div>
+        <div class="yc-track" role="img" aria-label="${name} 已发生 ${e} 天，门槛 ${thr} 天">
+          <div class="yc-bar">
+            <div class="yc-fill ${cls}" style="width:${ePct.toFixed(2)}%"></div>
+            <div class="yc-proj ${cls}" style="width:${pPct.toFixed(2)}%"></div>
+          </div>
+          <span class="yc-tick" style="left:${tPct.toFixed(2)}%" title="门槛 ${thr} 天"></span>
+        </div>
+      </div>`;
+  }
+
+  function ycCardHTML(d){
+    let sub;
+    if(d.elapsedDays === 0) sub = `${d.year} · 全年 ${d.totalDays} 天 · 尚未开始（以下均为预计）`;
+    else if(d.projectedDays === 0) sub = `${d.year} · 全年 ${d.totalDays} 天 · 已全部发生`;
+    else sub = `${d.year} · 全年 ${d.totalDays} 天 · 数据截至 ${d.today.slice(5)}`;
+
+    const baseKey = settings.base === 'MY' ? 'MY' : 'SG';
+    const rows = ycRowHTML(d, baseKey) + ycRowHTML(d, baseKey === 'SG' ? 'MY' : 'SG');
+
+    let other = '';
+    const oe = d.elapsed.other, op = d.projected.other;
+    if(oe > 0 || op > 0){
+      const chips = Object.entries(d.elapsed.otherBreakdown)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, days]) => `<span class="yc-chip"><i style="background:${ycChipColor(name)}"></i>${escapeHtml(name)} <b>${days}</b></span>`)
+        .join('');
+      other = `<div class="yc-other"><span class="yc-other-label">其他国家 · 合计 <b>${oe}</b> 天</span>${chips}${op > 0 ? `<span class="yc-muted">另有计划中 ${op} 天</span>` : ''}</div>`;
+    }
+
+    return `<div class="year-card yc"><div class="yc-sub">${sub}</div>${rows}${other}</div>`;
   }
 
   function renderOverviewYearSelect(data){
@@ -1432,47 +1740,11 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     const allData = computeYearlyData();
     renderOverviewYearSelect(allData);
     if(trips.length===0){
-      yearCardsEl.innerHTML = '<div class="empty-state">还没有任何行程记录 —— 添加第一条行程，年度统计会自动出现在这里。</div>';
+      yearCardsEl.innerHTML = '<div class="empty-state">还没有任何行程记录 —— 点右下角「＋」添加第一条行程，年度统计会自动出现在这里。</div>';
       return;
     }
     const data = allData.filter(d => d.year === selectedOverviewYear);
-    yearCardsEl.innerHTML = data.map(d=>{
-      const myPct = (d.myDays/d.totalDays*100).toFixed(1);
-      const sgPct = (d.sgDays/d.totalDays*100).toFixed(1);
-      const otherPct = (d.otherDays/d.totalDays*100).toFixed(1);
-
-      const myHit = d.myDays >= 182;
-      const sgHit = d.sgDays >= 183;
-
-      const otherList = Object.entries(d.otherBreakdown)
-        .sort((a,b)=>b[1]-a[1])
-        .map(([name,days])=>`<span class="stamp other">${escapeHtml(name)} <span class="n">${days}</span> 天</span>`)
-        .join('');
-
-      return `
-        <div class="year-card">
-          <div class="year-head">
-            <span class="year-num">${d.year}</span>
-            <span class="year-total">全年 ${d.totalDays} 天</span>
-          </div>
-          <div class="bar">
-            <div class="bar-seg seg-my" style="width:${myPct}%" title="马来西亚 ${d.myDays} 天"></div>
-            <div class="bar-seg seg-sg" style="width:${sgPct}%" title="新加坡 ${d.sgDays} 天"></div>
-            <div class="bar-seg seg-other" style="width:${otherPct}%" title="其他 ${d.otherDays} 天"></div>
-          </div>
-          <div class="stamp-row">
-            <span class="stamp my">马来西亚 <span class="n">${d.myDays}</span> 天</span>
-            <span class="stamp sg">新加坡 <span class="n">${d.sgDays}</span> 天</span>
-            ${d.otherDays>0 ? `<span class="stamp other">其他国家合计 <span class="n">${d.otherDays}</span> 天</span>` : ''}
-            ${otherList}
-          </div>
-          <div class="threshold-note">
-            <span>马来西亚 182 天门槛：<span class="${myHit?'hit':'ok'}">${d.myDays} / 182 ${myHit?'（已达）':''}</span></span>
-            <span>新加坡 183 天门槛：<span class="${sgHit?'hit':'ok'}">${d.sgDays} / 183 ${sgHit?'（已达）':''}</span></span>
-          </div>
-        </div>
-      `;
-    }).join('');
+    yearCardsEl.innerHTML = data.map(ycCardHTML).join('');
   }
 
   function escapeHtml(str){
@@ -1510,20 +1782,21 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     const sorted = [...trips].sort((a,b)=> new Date(b.start) - new Date(a.start));
     const rows = sorted.map(t=>{
       const d = daysInclusive(t.start, t.end);
+      const hasImg = t.imageIds && t.imageIds.length > 0;
       return `
         <tr>
-          <td data-label="目的地"><span class="tag ${destTagClass(t)}">${escapeHtml(destLabel(t))}</span></td>
-          <td data-label="出发">${t.start}</td>
-          <td data-label="返回">${t.end}</td>
-          <td data-label="天数">${d} 天</td>
-          <td data-label="交通方式"><span class="transport-tag" title="${transportLabel(t)}">${transportIcon(t)}</span></td>
-          <td data-label="路线">${t.route ? `<span class="route-text">${escapeHtml(t.route)}</span>` : '—'}</td>
-          <td data-label="备注">${t.note ? escapeHtml(t.note) : '—'}</td>
-          <td data-label="图片">${(t.imageIds && t.imageIds.length > 0) ? `<button class="view-image-link" data-action="viewImage" data-trip-id="${escapeHtml(t.id)}">查看图片 (${t.imageIds.length})</button>` : '—'}</td>
-          <td data-label="操作">
+          <td class="c-dest" data-label="目的地"><span class="tag ${destTagClass(t)}">${escapeHtml(destLabel(t))}</span></td>
+          <td class="c-start" data-label="出发">${t.start}</td>
+          <td class="c-end" data-label="返回">${t.end}</td>
+          <td class="c-days" data-label="天数">${d} 天</td>
+          <td class="c-mode" data-label="交通方式"><span class="transport-tag" title="${transportLabel(t)}">${transportIcon(t)}</span></td>
+          <td class="c-route${t.route ? '' : ' empty'}" data-label="路线">${t.route ? `<span class="route-text">${escapeHtml(t.route)}</span>` : '—'}</td>
+          <td class="c-note${t.note ? '' : ' empty'}" data-label="备注"><span>${t.note ? escapeHtml(t.note) : '—'}</span></td>
+          <td class="c-img${hasImg ? '' : ' empty'}" data-label="图片">${hasImg ? `<button class="view-image-link" data-action="viewImage" data-trip-id="${escapeHtml(t.id)}">查看图片 (${t.imageIds.length})</button>` : '—'}</td>
+          <td class="c-act" data-label="操作">
             <div class="row-actions">
-              <button data-action="editTrip" data-trip-id="${escapeHtml(t.id)}" title="编辑">✏️</button>
-              <button data-action="removeTrip" data-trip-id="${escapeHtml(t.id)}" title="删除">🗑️</button>
+              <button data-action="editTrip" data-trip-id="${escapeHtml(t.id)}" title="编辑" aria-label="编辑">✏️</button>
+              <button data-action="removeTrip" data-trip-id="${escapeHtml(t.id)}" title="删除" aria-label="删除">🗑️</button>
             </div>
           </td>
         </tr>
@@ -2243,12 +2516,28 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   });
   document.getElementById('printToggleBtn').addEventListener('click', ()=>{
     const section = document.getElementById('printSection');
-    section.style.display = (section.style.display === 'none') ? 'block' : 'none';
+    const willShow = section.style.display === 'none';
+    section.style.display = willShow ? 'block' : 'none';
+    document.getElementById('printToggleBtn').textContent = willShow ? '收起' : '🖨️ 打印';
   });
   document.getElementById('archiveToggleBtn').addEventListener('click', ()=>{
     const section = document.getElementById('archiveSection');
-    section.style.display = (section.style.display === 'none') ? 'block' : 'none';
+    const willShow = section.style.display === 'none';
+    section.style.display = willShow ? 'block' : 'none';
+    document.getElementById('archiveToggleBtn').textContent = willShow ? '收起' : '归档…';
   });
+
+  // The red plaintext warning only appears when encryption is actually off.
+  (function wireExportEncryptHint(){
+    const toggle = document.getElementById('exportEncryptToggle');
+    const hint = document.getElementById('exportEncryptHint');
+    function sync(){
+      if(toggle.checked){ hint.textContent = '导出时会要求设置备份密码'; hint.classList.remove('warn'); }
+      else { hint.textContent = '⚠ 明文备份没有密码保护，请妥善保管'; hint.classList.add('warn'); }
+    }
+    toggle.addEventListener('change', sync);
+    sync();
+  })();
 
   function showStorageModeNote(){
     const note = document.getElementById('storageModeNote');
@@ -2452,13 +2741,13 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     if(!btn) return;
     const supported = await biometricPlatformAvailable();
     if(!supported){
-      btn.textContent = '指纹/Face ID 解锁（此设备不支持）';
+      btn.textContent = '不支持';
       btn.disabled = true;
       return;
     }
     btn.disabled = false;
     const rec = idbDB ? await idbGet(BIO_META_KEY).catch(()=>null) : null;
-    btn.textContent = rec ? '🔓 关闭指纹/Face ID 解锁' : '👆 启用指纹/Face ID 解锁';
+    btn.textContent = rec ? '关闭' : '启用';
     btn.dataset.enabled = rec ? '1' : '0';
   }
 
@@ -2513,6 +2802,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // inline listener — so both the top-bar lock button and any other future
   // entry point can trigger the exact same behavior.
   async function lockAppNow(){
+    closeTripModal(false); // discard any half-filled trip form
+    hideToast();
     sessionKey = null;
     closeSidebar();
     lockOverlayEl.classList.add('open');
@@ -2617,7 +2908,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     const btn = document.getElementById('infoNoteBtn');
     const willShow = box.style.display === 'none';
     box.style.display = willShow ? 'block' : 'none';
-    btn.textContent = willShow ? '收起说明' : 'ℹ️ 说明';
+    btn.textContent = willShow ? '收起' : '查看';
   });
 
   (async function init(){

@@ -54,6 +54,8 @@
     --checkpoint-soft: #7FA396;
     --gold-line: #C9BFA6;
     --grey-text: #5A5648;
+    --sg-blue: #2F4A78;
+    --sg-blue-soft: #8FA3C4;
     --card-shadow: 0 1px 0 rgba(30,42,68,0.06), 0 8px 24px -12px rgba(30,42,68,0.25);
     --serif: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Songti SC', 'PingFang SC', serif;
     --mono: 'SF Mono', 'IBM Plex Mono', Consolas, 'Courier New', monospace;
@@ -143,7 +145,7 @@
   }
   select:focus, input:focus{outline:2px solid var(--checkpoint-soft); outline-offset:1px;}
 
-  form.trip-form{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;}
+  form.trip-form{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;margin:0;}
   .btn{
     font-family:var(--sans);
     font-size:13.5px;
@@ -196,7 +198,7 @@
   }
   .bar-seg{height:100%;}
   .seg-my{background:var(--checkpoint);}
-  .seg-sg{background:var(--stamp);}
+  .seg-sg{background:var(--sg-blue);}
   .seg-other{background:#8B8368;}
   .seg-empty{background:var(--paper-dark);}
 
@@ -218,7 +220,7 @@
   }
   .stamp .n{font-size:15px; font-weight:700;}
   .stamp.my{color:var(--checkpoint); border-color:var(--checkpoint-soft); background:rgba(62,98,89,0.06);}
-  .stamp.sg{color:var(--stamp); border-color:var(--stamp-soft); background:rgba(166,58,46,0.06);}
+  .stamp.sg{color:var(--sg-blue); border-color:var(--sg-blue-soft); background:rgba(47,74,120,0.06);}
   .stamp.other{color:#6B644C; border-color:#C9BFA6; background:rgba(139,131,104,0.08);}
 
   .threshold-note{
@@ -232,6 +234,59 @@
   }
   .threshold-note span.hit{color:var(--stamp); font-weight:700;}
   .threshold-note span.ok{color:var(--checkpoint); font-weight:700;}
+
+
+  /* ================= YEAR CARD v23: threshold progress rows ================= */
+  .yc{padding:16px 18px 14px; font-variant-numeric:tabular-nums; container:yc / inline-size;}
+  .yc-sub{font-family:var(--mono); font-size:11.5px; color:var(--grey-text); margin-bottom:14px;}
+  .yc-row{margin-bottom:14px;}
+  .yc-row:last-child{margin-bottom:0;}
+  /* Phone-first: line 1 = name + count; line 2 (only if there is anything to
+     say) = over-text on the left, status badge on the right. */
+  .yc-row-head{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px; margin-bottom:6px;}
+  .yc-count{font-family:var(--mono); font-size:12px; color:var(--grey-text); white-space:nowrap;}
+  .yc-state{flex:1 1 100%; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 10px;}
+  .yc-over{font-family:var(--mono); font-size:11.5px; color:#8A836C;}
+  .yc-state .yc-badge{margin-left:auto;}
+  /* Wide card: everything on one line, badge pushed to the right. */
+  @container yc (min-width:500px){
+    .yc-row-head{flex-wrap:nowrap; align-items:center;}
+    .yc-state{display:contents;}
+    .yc-over::before{content:'· ';}
+    .yc-over{flex:1 1 auto; min-width:0;}
+  }
+  .yc-name{display:flex; align-items:center; gap:7px; font-weight:700; font-size:14.5px; color:var(--ink);}
+  .yc-dot{width:9px; height:9px; border-radius:50%; display:inline-block; flex-shrink:0;}
+  .yc-dot.my, .yc-fill.my, .yc-seg.my{background:var(--checkpoint);}
+  .yc-dot.sg, .yc-fill.sg, .yc-seg.sg{background:var(--sg-blue);}
+  .yc-basetag{font-family:var(--mono); font-size:10.5px; font-weight:400; color:var(--grey-text);
+    border:1px solid var(--gold-line); border-radius:3px; padding:0 5px;}
+  .yc-badge{font-size:11.5px; padding:3px 10px; border-radius:999px; border:1px solid var(--gold-line);
+    color:var(--ink-soft); white-space:nowrap;}
+  .yc-badge.hit{font-weight:700;}
+  .yc-badge.hit.my{color:var(--checkpoint); border-color:var(--checkpoint-soft); background:rgba(62,98,89,0.09);}
+  .yc-badge.hit.sg{color:var(--sg-blue); border-color:var(--sg-blue-soft); background:rgba(47,74,120,0.08);}
+  .yc-track{position:relative; padding:3px 0;}
+  .yc-bar{display:flex; height:10px; border-radius:5px; overflow:hidden; background:var(--paper-dark);}
+  .yc-fill, .yc-proj{height:100%;}
+  .yc-proj.my{background:repeating-linear-gradient(135deg, rgba(62,98,89,0.5) 0 2px, transparent 2px 5px);}
+  .yc-proj.sg{background:repeating-linear-gradient(135deg, rgba(47,74,120,0.5) 0 2px, transparent 2px 5px);}
+  .yc-tick{position:absolute; top:0; bottom:0; width:2px; margin-left:-1px; background:var(--ink); border-radius:1px;}
+  .yc-n{font-size:17px; color:var(--ink); font-family:var(--mono);}
+  .yc-muted{color:#8A836C; font-size:11.5px;}
+  .yc-other{display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding-top:12px; margin-bottom:0;
+    border-top:1px dashed var(--gold-line);}
+  .yc-other-label{font-family:var(--mono); font-size:12px; color:var(--grey-text);}
+  .yc-other-label b{color:var(--ink);}
+  .yc-chip{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; padding:3px 9px;
+    border:1px solid var(--gold-line); border-radius:6px; background:#fff; color:var(--ink);}
+  .yc-chip i{width:8px; height:8px; border-radius:50%; display:inline-block;}
+
+  @media (max-width:600px){
+    .panel-year{padding:16px 14px;}
+    .panel-year .year-card{border:none; box-shadow:none; background:transparent; margin-bottom:0; overflow:visible;}
+    .panel-year .yc{padding:4px 0 0;}
+  }
 
   /* trip log table */
   table{width:100%; border-collapse:collapse; font-size:13px;}
@@ -257,7 +312,7 @@
     white-space:nowrap;
   }
   .tag.my{color:var(--checkpoint); border-color:var(--checkpoint-soft);}
-  .tag.sg{color:var(--stamp); border-color:var(--stamp-soft);}
+  .tag.sg{color:var(--sg-blue); border-color:var(--sg-blue-soft);}
   .tag.other{color:#6B644C; border-color:#C9BFA6;}
   .row-actions{display:flex; gap:10px;}
   .row-actions button{
@@ -267,6 +322,10 @@
     transition:background 0.15s;
   }
   .row-actions button:hover{background:var(--paper-dark);}
+  /* desktop: never break a date or "查看图片 (1)" across two lines; let the
+     table scroll sideways instead of squeezing */
+  .c-start, .c-end, .c-days, .c-img{white-space:nowrap;}
+  #tripTableWrap{overflow-x:auto; container:trips / inline-size;}
 
   .image-field{display:flex; flex-direction:column; gap:6px;}
   .image-thumb-list{display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;}
@@ -511,6 +570,63 @@
     td::before{content:attr(data-label); font-family:var(--mono); font-size:10.5px; color:var(--grey-text); text-transform:uppercase;}
   }
 
+  /* ===== Trip log on phones (v25): one compact card per trip =====
+     line 1: destination + transport ......... edit / delete
+     line 2: start → end  ·  N 天
+     then only the optional lines that have content: 路线 / 备注 / 附件 */
+  /* Container query on the list itself (not the viewport): a desktop window
+     with the settings rail open leaves only ~600px for the table, and the
+     edit/delete column would be pushed off-screen. */
+  @container trips (max-width:760px){
+    #tripTableWrap table, #tripTableWrap tbody{display:block;}
+    #tripTableWrap thead{display:none;}
+    #tripTableWrap tr{
+      display:grid; grid-template-columns:auto auto auto 1fr; column-gap:8px; row-gap:8px;
+      align-items:center; padding:12px; margin-bottom:10px;
+      background:#fff; border:1px solid var(--gold-line); border-radius:8px;
+    }
+    #tripTableWrap tr:last-child{margin-bottom:0;}
+    #tripTableWrap td{display:block; padding:0; border:none; min-width:0;}
+    #tripTableWrap td::before{display:none;}
+    #tripTableWrap td.empty{display:none;}
+
+    #tripTableWrap .c-dest{grid-column:1; grid-row:1;}
+    #tripTableWrap .c-mode{grid-column:2; grid-row:1;}
+    #tripTableWrap .c-act{grid-column:4; grid-row:1; justify-self:end; margin:-6px -8px -6px 0;}
+    #tripTableWrap .c-start{grid-column:1; grid-row:2;}
+    #tripTableWrap .c-end{grid-column:2; grid-row:2;}
+    #tripTableWrap .c-end::before{display:inline; content:'→ '; color:var(--grey-text);}
+    #tripTableWrap .c-days{grid-column:3; grid-row:2;}
+    #tripTableWrap .c-start, #tripTableWrap .c-end{font-family:var(--mono); font-size:12.5px; color:var(--ink);}
+    #tripTableWrap .c-days{font-weight:700; color:var(--ink);}
+    #tripTableWrap .tag{font-size:12px; padding:3px 9px;}
+
+    #tripTableWrap .c-route, #tripTableWrap .c-note, #tripTableWrap .c-img{grid-column:1 / -1;}
+    #tripTableWrap .c-route, #tripTableWrap .c-note{display:flex; justify-content:flex-start; gap:10px; align-items:baseline;}
+    #tripTableWrap .c-route::before, #tripTableWrap .c-note::before{
+      content:attr(data-label); display:block; flex:0 0 2.2em; font-family:var(--sans); font-size:11px; color:var(--grey-text); text-transform:none;
+    }
+    #tripTableWrap .c-note span{font-size:13px; color:var(--ink); min-width:0; overflow-wrap:anywhere;}
+    #tripTableWrap .route-text{overflow-wrap:anywhere;}
+
+    #tripTableWrap .c-img .view-image-link{
+      display:inline-flex; align-items:center; gap:6px; min-height:36px; padding:6px 14px;
+      font-size:13px; text-decoration:none; color:var(--checkpoint);
+      border:1px solid var(--checkpoint-soft); border-radius:999px; background:rgba(62,98,89,0.06);
+    }
+    #tripTableWrap .c-img .view-image-link::before{content:'📎';}
+
+    #tripTableWrap .row-actions{gap:2px;}
+  }
+  @container trips (max-width:250px){
+    #tripTableWrap tr{column-gap:6px;}
+    #tripTableWrap .c-start, #tripTableWrap .c-end{font-size:11px;}
+    #tripTableWrap .c-end::before{content:'→';}
+  }
+  @container trips (max-width:760px){
+    #tripTableWrap .row-actions button{width:40px; height:40px; font-size:18px; border-radius:8px;}
+  }
+
   /* ================= TOP BAR (hamburger + title + Save/Lock) ================= */
   .app-topbar{
     position:sticky; top:0; z-index:500;
@@ -571,6 +687,41 @@
   .sidebar-section-label:first-child{margin-top:0;}
   .sidebar-content .panel{margin-bottom:0;}
 
+  /* ================= SETTINGS DRAWER v26: grouped list =================
+     One card per group; every setting is a row separated by a hairline:
+     label (+ small hint) on the left, control on the right. Rows holding two
+     buttons or a wide control ("stack") put the control on its own line. */
+  .set-group-label{
+    font-family:var(--mono); font-size:11px; letter-spacing:0.12em; font-weight:700;
+    color:var(--stamp); margin:20px 2px 8px;
+  }
+  .set-group-label:first-child{margin-top:0;}
+  .set-card{background:#fff; border:1px solid var(--gold-line); border-radius:8px; box-shadow:var(--card-shadow); overflow:hidden;}
+  .set-row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; min-height:54px; border-top:1px solid var(--paper-dark);}
+  .set-row:first-child{border-top:none;}
+  .set-row.stack{flex-direction:column; align-items:stretch; justify-content:flex-start; gap:8px;}
+  .set-text{min-width:0; flex:1 1 auto;}
+  .set-label{font-size:14px; font-weight:600; color:var(--ink);}
+  .set-label label{font-size:inherit; color:inherit; letter-spacing:0;}
+  .set-label.set-warn{color:var(--stamp);}
+  .set-hint{font-size:11.5px; line-height:1.55; color:var(--grey-text); margin-top:2px;}
+  .set-hint.warn{color:var(--stamp);}
+  .set-meter-text{font-family:var(--mono); font-size:12px; line-height:1.5; color:var(--grey-text);}
+  .set-btn-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  .btn.sm{padding:7px 12px; font-size:13px; min-height:36px; white-space:nowrap; flex-shrink:0;}
+  .set-btn-grid .btn.sm{width:100%; padding-left:6px; padding-right:6px;}
+  .btn.ghost.danger{border-color:var(--stamp-soft);}
+  .btn.ghost:disabled{opacity:0.55; cursor:default; border-color:var(--gold-line); color:var(--grey-text);}
+  .set-row select{width:100%; min-width:0; box-sizing:border-box;}
+  .set-note{padding:12px 14px; border-top:1px solid var(--paper-dark); background:#FBF9F2; font-size:12px; line-height:1.7; color:var(--grey-text);}
+  .set-sub{padding:12px 14px 14px; border-top:1px solid var(--paper-dark); background:#FBF9F2;}
+  .set-sub > label{display:block; font-size:12px; color:var(--grey-text); margin-bottom:6px;}
+  .set-sub .set-hint{margin-top:8px;}
+  .set-inline{display:flex; gap:8px; align-items:center;}
+  .set-inline select{flex:1 1 90px; min-width:0;}
+  .set-status{height:auto; padding:8px 14px; border-top:1px solid var(--paper-dark); font-size:12px; line-height:1.5;}
+  .set-status:empty{display:none;}
+
   .app-body-layout{display:block;}
 
   @media (min-width:768px){
@@ -583,6 +734,104 @@
     }
     .app-main-col{flex:1; min-width:0;}
   }
+
+  /* ================= ADD / EDIT TRIP: FAB + MODAL (v22) =================
+     The inline "新增行程" card was moved into a modal so it no longer takes
+     up space above the year overview. z-index ladder:
+       FAB 450 < top bar 500 < sidebar 600/601 < trip modal 900 < toast 950
+       < image viewer 1000 < lock screen 2000 < version badge 3000        */
+  .fab{
+    position:fixed; right:18px; bottom:calc(34px + env(safe-area-inset-bottom, 0px));
+    width:54px; height:54px; padding:0; border:none; border-radius:50%;
+    background:var(--ink); color:var(--paper); cursor:pointer; z-index:450;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 10px 22px -8px rgba(30,42,68,0.55);
+    -webkit-tap-highlight-color:transparent;
+    transition:transform .12s ease, background .12s ease;
+  }
+  .fab:hover{background:#16213a;}
+  .fab:active{transform:scale(0.94);}
+  .fab svg{width:26px; height:26px;}
+
+  .trip-modal-overlay{
+    display:none; position:fixed; inset:0; z-index:900;
+    background:rgba(30,42,68,0.55);
+    align-items:flex-end; justify-content:center;
+  }
+  .trip-modal-overlay.open{display:flex; animation:tripFade .18s ease-out;}
+  .trip-modal{
+    display:flex; flex-direction:column;
+    width:100%; max-width:560px; max-height:92vh; max-height:92dvh;
+    background:#fff; border:1px solid var(--gold-line); border-bottom:none;
+    border-radius:12px 12px 0 0; box-shadow:var(--card-shadow); outline:none;
+    animation:tripSheetUp .24s cubic-bezier(.2,.8,.2,1);
+  }
+  .trip-modal-head{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:14px 18px 12px; border-bottom:1px dashed var(--gold-line); flex-shrink:0;
+  }
+  .trip-modal-head .panel-title{margin:0;}
+  .trip-modal-close{
+    width:34px; height:34px; padding:0; flex-shrink:0;
+    background:transparent; border:1px solid var(--gold-line); border-radius:8px;
+    font-size:20px; line-height:1; color:var(--ink-soft); cursor:pointer;
+  }
+  .trip-modal-close:hover{border-color:var(--stamp); color:var(--stamp);}
+  .trip-modal-body{
+    flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch; padding:16px 18px;
+  }
+  .trip-grid{display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px;}
+  .trip-grid .span-2{grid-column:1 / -1;}
+  .trip-grid select, .trip-grid input[type=date], .trip-grid input[type=text]{
+    min-width:0; width:100%;
+  }
+  .trip-modal-foot{
+    display:flex; gap:10px; justify-content:flex-end; flex-shrink:0;
+    padding:12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-top:1px dashed var(--gold-line); background:#fff;
+  }
+  .trip-modal-foot .btn{padding:10px 18px;}
+  .trip-modal-foot #submitBtn{flex:1 1 auto;}
+  .trip-modal-foot #submitBtn:disabled{opacity:0.6; cursor:default;}
+  html.modal-open, html.modal-open body{overflow:hidden;}
+
+  @media (min-width:640px){
+    .trip-modal-overlay{align-items:center; padding:24px;}
+    .trip-modal{border-bottom:1px solid var(--gold-line); border-radius:6px; max-height:88vh; max-height:88dvh; animation-name:tripPop;}
+    .trip-modal-foot #submitBtn{flex:0 0 auto; min-width:130px;}
+  }
+  @media (max-width:639px){
+    /* 16px stops iOS Safari zooming the page when a field is focused */
+    .trip-grid select, .trip-grid input[type=date], .trip-grid input[type=text]{font-size:16px; padding:10px 8px;}
+  }
+  @media (max-width:359px){ .trip-grid{grid-template-columns:minmax(0,1fr);} }
+  @keyframes tripFade{from{opacity:0}to{opacity:1}}
+  @keyframes tripSheetUp{from{transform:translateY(40px); opacity:0}to{transform:none; opacity:1}}
+  @keyframes tripPop{from{transform:translateY(10px) scale(.98); opacity:0}to{transform:none; opacity:1}}
+  @media (prefers-reduced-motion:reduce){
+    .trip-modal-overlay.open, .trip-modal, .toast.show{animation:none;}
+  }
+
+  .add-trip-btn{padding:7px 14px; font-size:13px; white-space:nowrap;}
+  /* on phones the floating ＋ is the single entry point (the two would collide) */
+  @media (max-width:639px){ .add-trip-btn{display:none;} }
+  /* the build badge would sit on top of the modal's action buttons */
+  html.modal-open .version-badge{display:none;}
+
+  .toast{
+    position:fixed; left:50%; transform:translateX(-50%); z-index:950;
+    bottom:calc(100px + env(safe-area-inset-bottom, 0px));
+    display:none; align-items:center; gap:14px; max-width:min(92vw, 440px);
+    background:var(--ink); color:var(--paper); font-family:var(--sans); font-size:13px;
+    line-height:1.5; padding:10px 14px; border-radius:6px; box-shadow:var(--card-shadow);
+  }
+  .toast.show{display:flex; animation:tripFade .18s ease-out;}
+  .toast button{
+    background:none; border:none; padding:0; cursor:pointer; flex-shrink:0;
+    font:inherit; color:#F0C9C2; text-decoration:underline;
+  }
+  @media print{ .fab, .toast, .trip-modal-overlay{display:none !important;} }
 </style>
 </head>
 <body>
@@ -639,115 +888,103 @@
   </div>
   <div class="sidebar-content">
 
-  <div class="sidebar-section-label">基础设置</div>
-  <section class="panel">
-    <div class="panel-title"><span class="tick"></span>基础设置</div>
-    <div class="settings-row">
-      <div class="field">
-        <label for="baseLocation">你的常驻地（未记录行程的日子将计入此地）</label>
-        <select id="baseLocation">
-          <option value="SG">新加坡（工作/居住地）</option>
-          <option value="MY">马来西亚</option>
-        </select>
+  <div class="set-group-label">基础设置</div>
+  <section class="set-card">
+    <div class="set-row stack">
+      <div class="set-text">
+        <div class="set-label"><label for="baseLocation">常驻地</label></div>
+        <div class="set-hint">没有记录行程的日子，会计入这里</div>
       </div>
-      <div class="field">
-        <label>&nbsp;</label>
-        <div style="display:flex; gap:6px;">
-          <button type="button" class="btn ghost" id="changePassBtn">更改密码</button>
-        </div>
-      </div>
-      <div class="field">
-        <label>&nbsp;</label>
-        <button type="button" class="btn ghost" id="bioToggleBtn">指纹 / Face ID 解锁</button>
-      </div>
-      <div class="field">
-        <label>&nbsp;</label>
-        <button type="button" class="btn ghost" id="infoNoteBtn">ℹ️ 说明</button>
-      </div>
-      <div class="save-status" id="saveStatus"></div>
+      <select id="baseLocation">
+        <option value="SG">新加坡（工作/居住地）</option>
+        <option value="MY">马来西亚</option>
+      </select>
     </div>
-    <div id="infoNoteBox" style="font-size:11.5px; color:var(--grey-text); margin-top:10px; display:none;">
+    <div class="set-row">
+      <div class="set-text"><div class="set-label">密码</div></div>
+      <button type="button" class="btn ghost sm" id="changePassBtn">更改密码</button>
+    </div>
+    <div class="set-row">
+      <div class="set-text"><div class="set-label">指纹 / Face ID 解锁</div></div>
+      <button type="button" class="btn ghost sm" id="bioToggleBtn">…</button>
+    </div>
+    <div class="set-row">
+      <div class="set-text"><div class="set-label">安全与存储说明</div></div>
+      <button type="button" class="btn ghost sm" id="infoNoteBtn">查看</button>
+    </div>
+    <div id="infoNoteBox" class="set-note" style="display:none;">
       <div id="storageModeNote" style="display:none;"></div>
       <div style="margin-top:8px;">
         🔒 本工具所有数据均使用密码派生的密钥加密保存（PBKDF2 + AES-GCM）。密码仅保存在本次会话的内存中，不会被存储。指纹/Face ID 解锁只是密码的便捷入口（需要 iOS 18+ / 较新版 Android Chrome）——换设备或清除浏览器数据后，仍需用密码解锁。
       </div>
     </div>
+    <div class="save-status set-status" id="saveStatus"></div>
   </section>
 
-  <div class="sidebar-section-label">导出与打印</div>
-  <section class="panel">
-    <div class="panel-title"><span class="tick"></span>导出与打印</div>
-    <div class="settings-row">
-      <div class="field">
-        <label for="exportBtn">备份数据</label>
-        <div style="display:flex; gap:6px;">
-          <button type="button" class="btn ghost" id="exportBtn">导出为 JSON</button>
-          <button type="button" class="btn ghost" id="exportZipBtn">导出为 ZIP</button>
-        </div>
-      </div>
-      <div class="field">
-        <label for="importBtn">恢复数据</label>
-        <div style="display:flex; gap:6px;">
-          <button type="button" class="btn ghost" id="importBtn">导入 JSON</button>
-          <button type="button" class="btn ghost" id="importZipBtn">导入 ZIP</button>
-        </div>
-        <input type="file" id="importFile" accept="application/json,.json" style="display:none;">
-        <input type="file" id="importZipFile" accept=".zip,application/zip" style="display:none;">
-      </div>
-      <div class="field" style="min-width:200px;">
-        <label for="exportEncryptToggle">导出加密</label>
-        <div style="display:flex; align-items:center; gap:8px; padding-top:6px;">
-          <label class="switch">
-            <input type="checkbox" id="exportEncryptToggle" checked>
-            <span class="switch-slider"></span>
-          </label>
-          <span style="font-size:12px; color:var(--grey-text);">开启后导出文件需设置备份密码</span>
-        </div>
-        <div style="font-size:11px; color:var(--stamp); margin-top:2px;">明文备份不含密码保护，请妥善保管</div>
-      </div>
-      <div class="field">
-        <label>&nbsp;</label>
-        <button type="button" class="btn" id="printToggleBtn">🖨️ 打印</button>
+  <div class="set-group-label">导出与打印</div>
+  <section class="set-card">
+    <div class="set-row stack">
+      <div class="set-label">备份数据</div>
+      <div class="set-btn-grid">
+        <button type="button" class="btn ghost sm" id="exportBtn">导出为 JSON</button>
+        <button type="button" class="btn ghost sm" id="exportZipBtn">导出为 ZIP</button>
       </div>
     </div>
-    <div id="printSection" style="display:none; margin-top:12px; padding-top:12px; border-top:1px dashed var(--gold-line);">
-      <div class="settings-row">
-        <div class="field">
-          <label for="printYearSelect">选择年份</label>
-          <select id="printYearSelect"></select>
-        </div>
-        <div class="field">
-          <label>&nbsp;</label>
-          <button type="button" class="btn" id="printBtn">打印该年度记录（英文报告）</button>
-        </div>
+    <div class="set-row stack">
+      <div class="set-label">恢复数据</div>
+      <div class="set-btn-grid">
+        <button type="button" class="btn ghost sm" id="importBtn">导入 JSON</button>
+        <button type="button" class="btn ghost sm" id="importZipBtn">导入 ZIP</button>
+      </div>
+      <input type="file" id="importFile" accept="application/json,.json" style="display:none;">
+      <input type="file" id="importZipFile" accept=".zip,application/zip" style="display:none;">
+    </div>
+    <div class="set-row">
+      <div class="set-text">
+        <div class="set-label"><label for="exportEncryptToggle">导出加密</label></div>
+        <div class="set-hint" id="exportEncryptHint">导出时会要求设置备份密码</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="exportEncryptToggle" checked>
+        <span class="switch-slider"></span>
+      </label>
+    </div>
+    <div class="set-row">
+      <div class="set-text">
+        <div class="set-label">打印</div>
+        <div class="set-hint">按年份生成英文报告</div>
+      </div>
+      <button type="button" class="btn ghost sm" id="printToggleBtn">🖨️ 打印</button>
+    </div>
+    <div id="printSection" class="set-sub" style="display:none;">
+      <label for="printYearSelect">选择年份</label>
+      <div class="set-inline">
+        <select id="printYearSelect"></select>
+        <button type="button" class="btn sm" id="printBtn">打印英文报告</button>
       </div>
     </div>
-    <div id="storageMeterWrap" style="margin-top:16px; padding-top:14px; border-top:1px dashed var(--gold-line);">
-      <div id="storageMeterText" style="font-family:var(--mono); font-size:12px; color:var(--grey-text); margin-bottom:6px;">存储用量计算中…</div>
+    <div class="set-row stack" id="storageMeterWrap">
+      <div class="set-label">存储用量</div>
+      <div id="storageMeterText" class="set-meter-text">存储用量计算中…</div>
       <div class="storage-bar" id="storageBar" style="display:none;">
         <div class="storage-bar-fill" id="storageBarFill" style="width:0%;"></div>
       </div>
-      <div id="storageMeterSub" style="font-family:var(--mono); font-size:11px; color:var(--grey-text); margin-top:4px;"></div>
+      <div id="storageMeterSub" class="set-hint" style="margin-top:0;"></div>
     </div>
-    <div style="margin-top:16px; padding-top:14px; border-top:1px dashed var(--stamp-soft);">
-      <button type="button" class="btn ghost" id="archiveToggleBtn" style="border-color:var(--stamp-soft); color:var(--stamp); font-weight:600;">
-        空间不够用？按年归档
-      </button>
-      <div id="archiveSection" style="display:none; margin-top:12px;">
-        <div class="settings-row">
-          <div class="field">
-            <label for="archiveYearSelect">选择要归档的年份</label>
-            <select id="archiveYearSelect"></select>
-          </div>
-          <div class="field">
-            <label>&nbsp;</label>
-            <button type="button" class="btn ghost" id="archiveBtn" style="border-color:var(--stamp-soft); color:var(--stamp);">导出该年并删除</button>
-          </div>
-        </div>
-        <div style="font-size:11px; color:var(--grey-text); margin-top:6px;">
-          会先下载该年份的完整备份（含图片），确认保存好后再从本地删除释放空间。以后需要可以用上面「导入 JSON」拿回来。
-        </div>
+    <div class="set-row">
+      <div class="set-text">
+        <div class="set-label set-warn">按年归档</div>
+        <div class="set-hint">空间不够用时：先下载该年备份，再从本机删除</div>
       </div>
+      <button type="button" class="btn ghost sm danger" id="archiveToggleBtn">归档…</button>
+    </div>
+    <div id="archiveSection" class="set-sub" style="display:none;">
+      <label for="archiveYearSelect">选择要归档的年份</label>
+      <div class="set-inline">
+        <select id="archiveYearSelect"></select>
+        <button type="button" class="btn ghost sm danger" id="archiveBtn">导出该年并删除</button>
+      </div>
+      <div class="set-hint">会先下载该年份的完整备份（含图片），确认保存好后再从本地删除释放空间。以后需要，可在「恢复数据」里导入 JSON 拿回来。</div>
     </div>
   </section>
 
@@ -809,67 +1046,7 @@
 
 <main>
 
-  <section class="panel">
-    <div class="panel-title"><span class="tick"></span><span id="formTitle">新增行程</span></div>
-    <form class="trip-form" id="tripForm">
-      <div class="field">
-        <label for="destSelect">目的地</label>
-        <select id="destSelect">
-          <option value="MY">马来西亚</option>
-          <option value="SG">新加坡</option>
-          <option value="OTHER">其他国家</option>
-        </select>
-      </div>
-      <div class="field" id="otherNameField" style="display:none;">
-        <label for="otherName">国家名称</label>
-        <input type="text" id="otherName" placeholder="例如：泰国">
-      </div>
-      <div class="field">
-        <label for="startDate">出发日期</label>
-        <input type="date" id="startDate" required>
-      </div>
-      <div class="field">
-        <label for="endDate">返回日期</label>
-        <input type="date" id="endDate" required>
-      </div>
-      <div class="field">
-        <label for="transportMode">交通方式</label>
-        <select id="transportMode">
-          <option value="AIR">✈️ 飞机</option>
-          <option value="LAND">🚗 陆路</option>
-          <option value="SEA">🚢 海路</option>
-          <option value="OTHER">其他</option>
-        </select>
-      </div>
-      <div class="field" style="min-width:200px;">
-        <label for="routeDetail">路线（可选）</label>
-        <input type="text" id="routeDetail" placeholder="例如：SG-JB-BKI-JB-SG">
-      </div>
-      <div class="field" style="flex:1; min-width:160px;">
-        <label for="tripNote">备注（可选）</label>
-        <input type="text" id="tripNote" placeholder="例如：出差 / 探亲">
-      </div>
-      <div class="field image-field" style="flex:1; min-width:220px;">
-        <label for="tripImage">参考图片 / PDF（可选，可多张）</label>
-        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-          <input type="file" id="tripImage" accept="image/*,application/pdf" multiple style="flex:1 1 140px; min-width:0; max-width:100%;">
-          <button type="button" class="btn ghost" id="cameraBtn" title="拍照" style="white-space:nowrap; padding:8px 12px; flex-shrink:0;">📷 拍照</button>
-          <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;">
-        </div>
-        <div class="image-thumb-list" id="imageThumbList"></div>
-      </div>
-      <div class="field">
-        <label>&nbsp;</label>
-        <button type="submit" class="btn" id="submitBtn">添加记录</button>
-      </div>
-      <div class="field" id="cancelEditField" style="display:none;">
-        <label>&nbsp;</label>
-        <button type="button" class="btn ghost" id="cancelEditBtn">取消编辑</button>
-      </div>
-    </form>
-  </section>
-
-  <section class="panel">
+  <section class="panel panel-year">
     <div class="panel-title" style="justify-content:space-between; flex-wrap:wrap; gap:10px;">
       <span style="display:flex; align-items:center; gap:8px;"><span class="tick"></span>年度天数总览</span>
       <select id="overviewYearSelect" style="min-width:100px;"></select>
@@ -878,7 +1055,10 @@
   </section>
 
   <section class="panel">
-    <div class="panel-title"><span class="tick"></span>行程记录</div>
+    <div class="panel-title" style="justify-content:space-between; gap:10px;">
+      <span style="display:flex; align-items:center; gap:8px;"><span class="tick"></span>行程记录</span>
+      <button type="button" class="btn add-trip-btn" id="addTripBtn">＋ 新增行程</button>
+    </div>
     <div id="tripTableWrap"></div>
   </section>
 
@@ -887,6 +1067,78 @@
 </div><!-- /.app-body-layout -->
 
 <div id="printArea"></div>
+
+<button type="button" class="fab" id="addTripFab" aria-label="新增行程" title="新增行程">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+</button>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<div class="trip-modal-overlay" id="tripModalOverlay">
+  <div class="trip-modal" id="tripModal" role="dialog" aria-modal="true" aria-labelledby="formTitle" tabindex="-1">
+    <div class="trip-modal-head">
+      <div class="panel-title"><span class="tick"></span><span id="formTitle">新增行程</span></div>
+      <button type="button" class="trip-modal-close" id="tripModalCloseBtn" aria-label="关闭">×</button>
+    </div>
+    <form class="trip-form" id="tripForm">
+      <div class="trip-modal-body" id="tripModalBody">
+        <div class="trip-grid">
+          <div class="field">
+            <label for="destSelect">目的地</label>
+            <select id="destSelect">
+              <option value="MY">马来西亚</option>
+              <option value="SG">新加坡</option>
+              <option value="OTHER">其他国家</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="transportMode">交通方式</label>
+            <select id="transportMode">
+              <option value="AIR">✈️ 飞机</option>
+              <option value="LAND">🚗 陆路</option>
+              <option value="SEA">🚢 海路</option>
+              <option value="OTHER">其他</option>
+            </select>
+          </div>
+          <div class="field span-2" id="otherNameField" style="display:none;">
+            <label for="otherName">国家名称</label>
+            <input type="text" id="otherName" placeholder="例如：泰国" list="countryList" autocomplete="off">
+            <datalist id="countryList"><option value="越南"><option value="韩国"><option value="中国"><option value="泰国"><option value="日本"><option value="印尼"><option value="菲律宾"><option value="柬埔寨"><option value="老挝"><option value="缅甸"><option value="台湾"><option value="香港"><option value="澳门"><option value="印度"><option value="文莱"><option value="澳洲"><option value="美国"><option value="英国"></datalist>
+          </div>
+          <div class="field">
+            <label for="startDate">出发日期</label>
+            <input type="date" id="startDate" required>
+          </div>
+          <div class="field">
+            <label for="endDate">返回日期</label>
+            <input type="date" id="endDate" required>
+          </div>
+          <div class="field span-2">
+            <label for="routeDetail">路线（可选）</label>
+            <input type="text" id="routeDetail" placeholder="例如：SG-JB-BKI-JB-SG">
+          </div>
+          <div class="field span-2">
+            <label for="tripNote">备注（可选）</label>
+            <input type="text" id="tripNote" placeholder="例如：出差 / 探亲">
+          </div>
+          <div class="field image-field span-2">
+            <label for="tripImage">参考图片 / PDF（可选，可多张）</label>
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+              <input type="file" id="tripImage" accept="image/*,application/pdf" multiple style="flex:1 1 140px; min-width:0; max-width:100%;">
+              <button type="button" class="btn ghost" id="cameraBtn" title="拍照" style="white-space:nowrap; padding:8px 12px; flex-shrink:0;">📷 拍照</button>
+              <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;">
+            </div>
+            <div class="image-thumb-list" id="imageThumbList"></div>
+          </div>
+        </div>
+      </div>
+      <div class="trip-modal-foot">
+        <button type="button" class="btn ghost" id="cancelEditBtn">取消</button>
+        <button type="submit" class="btn" id="submitBtn">添加记录</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <div class="img-modal-overlay" id="imgModalOverlay">
   <div class="img-modal-box">
@@ -910,7 +1162,7 @@
 <div class="version-badge" id="versionBadge"></div>
 
 <div class="footer-note">
-  说明：天数计算采用「出发日与返回日均计为整天」的简化方式，实际税务规则（例如马来西亚 182 天 / 新加坡 183 天居民门槛）可能有不同的计算细节。以上门槛数字仅供参考，不构成税务意见，具体请以马来西亚内陆税收局（LHDN）、新加坡税务局（IRAS）规定或专业税务顾问意见为准。
+  说明：天数计算采用「出发日与返回日均计为整天」的简化方式，实际税务规则（例如马来西亚 182 天 / 新加坡 183 天居民门槛）可能有不同的计算细节。门槛是否达标只按截至今天已发生的天数判断；年度卡进度条上的斜纹是尚未发生的日子，仅按已录入的计划和常驻地估算，不计入达标判断；没有记录的日子一律计入常驻地。以上门槛数字仅供参考，不构成税务意见，具体请以马来西亚内陆税收局（LHDN）、新加坡税务局（IRAS）规定或专业税务顾问意见为准。
 </div>
 
 <!--

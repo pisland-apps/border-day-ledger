@@ -154,7 +154,94 @@ before they're ever stored. `attachmentThumbMarkup()` also now runs `dataURL`
 through `escapeHtml()` as defense-in-depth — a no-op for real attachments,
 since legitimate base64 data URLs never contain the characters it escapes.
 
+## v22: Add / Edit trip form moved into a modal
+
+The inline 新增行程 card used to sit above the year overview and pushed
+everything down. It is now a modal (`#tripModalOverlay`), opened by:
+
+- the floating ＋ button (`#addTripFab`, bottom-right, always reachable),
+- the ＋ 新增行程 button in the 行程记录 header (`#addTripBtn`, hidden on
+  phones where it would collide with the floating button),
+- the ✏️ button on a trip row (edit mode: same modal, title 编辑行程).
+
+Behaviour worth knowing when touching this code:
+
+- **History / Back**: opening pushes one dummy history entry (same pattern as
+  the image viewer). Back closes the modal. Closing any other way (×, 取消,
+  Esc, save) retires that entry with `history.back()`, and `tripModalSelfPop`
+  makes the resulting `popstate` a no-op — without it the scroll-to-top guard
+  would misread it as a Back press and jump the page.
+- **No silent data loss**: once anything is typed/attached, tapping the dark
+  backdrop does nothing, and ×/取消/Esc/Back ask "放弃未保存的内容？" first.
+  Closing is refused while a save is in flight; the submit button is disabled
+  during save so a double-tap can't create a duplicate trip.
+- **Lock**: `lockAppNow()` discards a half-filled form before showing the lock
+  screen.
+- **Feedback**: `showToast()` (bottom toast) confirms add/update, since the
+  old `#saveStatus` text lives inside the settings drawer (hidden on phones).
+- Also fixed on the way: the retry action after a partial image-save failure
+  on *edit* used `editingId` after it had been reset to null, so it did nothing.
+- z-index ladder: FAB 450 < top bar 500 < sidebar 600 < trip modal 900 <
+  toast 950 < image viewer 1000 < lock screen 2000 < version badge 3000.
+
+## v23: Year overview card redesigned around elapsed days
+
+`computeYearlyData()` keeps its old full-year fields (`myDays`, `sgDays`,
+`otherDays`, `otherBreakdown` — the print view still reads them) and now also
+returns `elapsedDays`, `projectedDays`, `elapsed{my,sg,other,otherBreakdown}`
+and `projected{...}`. "Elapsed" = Jan 1 through today (local date, inclusive);
+"projected" = the rest of the year (planned trips already entered + everything
+else at the base location). Unrecorded days always go to the base location.
+
+- **Threshold checks (MY 182 / SG 183) use elapsed days only.** States:
+  已达 / 还差 N 天 / 今年已不可能达到 (elapsed + remaining days < threshold) /
+  未达 (past year) / 尚未开始 (future year). Hatched bar segments and
+  "预计全年" are estimates and never affect the badge.
+- Colours: Malaysia green, Singapore blue (`--sg-blue`, also applied to the
+  trip-table tag). Red is no longer used for a country. Badges are neutral.
+- `countryDisplayName()` groups/renders free-text countries under one Chinese
+  name ("VIETNAM"/"Vietnam"/"越南" → 越南) via `COUNTRY_ALIASES`. Display only;
+  stored `otherName` is untouched. The 国家名称 field has a `<datalist>` of
+  common countries so new entries are consistent.
+- Not done (deliberately): click-a-country-chip to filter the trip list.
+
+## v24: year card trimmed for phones
+
+Removed from the card: the "预计全年 N 天" captions, the bottom stacked strip
+(+ its caption) and the "今年已不可能达到" badge (`ycThresholdState` still
+returns `impossible`, it just renders no badge). The elapsed count now sits
+beside the country name. Layout is phone-first: line 1 = name + count, line 2
+(only if present) = "已超过门槛 N 天" + status badge; when the card is
+≥500px wide (`@container yc`) it collapses into one line. On ≤600px the
+inner card frame is flattened (`.panel-year`) to win back width. The hatched
+part of each bar (not-yet-elapsed days) stays, with no legend besides the
+footer note.
+
+## v25: trip log as compact cards on phones
+
+`renderTripTable()` now tags each cell (`c-dest`, `c-start`, `c-end`, `c-days`,
+`c-mode`, `c-route`, `c-note`, `c-img`, `c-act`) and marks empty optional cells
+`.empty`. Desktop is still a table (dates/“查看图片” no longer wrap; the wrapper
+scrolls sideways if it must). At ≤600px each `<tr>` becomes a grid card: line 1
+destination + transport + edit/delete (40px targets), line 2 `start → end · N 天`,
+then 路线 / 备注 / 附件 only when present. The mobile rules sit AFTER the generic
+`table,td{display:block}` rule and are scoped by `#tripTableWrap` to win.
+Delete now asks for confirmation (it also deletes attachments, no undo).
+Year card: dropped the word 已发生 from the "其他国家" label.
+
+## v26: settings drawer redesigned as grouped lists
+
+The drawer had two "panels" that repeated their own headings, `<label>&nbsp;</label>`
+spacers that produced big blank gaps, a disabled button carrying a long
+"不支持" sentence, and a red plaintext warning that was always on. Now: two
+cards (基础设置 / 导出与打印), one row per setting separated by hairlines —
+label (+hint) left, control right (`.set-row`); rows with paired buttons or a
+select use `.set-row.stack` (control on its own line). All element ids are
+unchanged. Button captions got shorter (指纹 button: 启用 / 关闭 / 不支持;
+说明: 查看 / 收起; print + archive toggles: … / 收起). The plaintext warning is
+shown only while 导出加密 is off. `#saveStatus` is hidden while empty.
+
 ## Current versions
 
-- `APP_VERSION`: `v20` (`app.js`)
-- `CACHE_NAME`: `border-day-ledger-cache-v20` (`sw.js`)
+- `APP_VERSION`: `v26` (`app.js`)
+- `CACHE_NAME`: `border-day-ledger-cache-v26` (`sw.js`)
