@@ -42,7 +42,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v26';
+  const APP_VERSION = 'v27';
   const APP_VERSION_DATE = '2026-09-20';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
@@ -2840,6 +2840,120 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   if(sidebarCloseBtnEl) sidebarCloseBtnEl.addEventListener('click', closeSidebar);
   if(sidebarOverlayEl) sidebarOverlayEl.addEventListener('click', closeSidebar);
   document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeSidebar(); });
+
+
+  // ================= HEADER: tap the logo to read the description (phones) =================
+  (function wireIntroPopover(){
+    const btn = document.getElementById('logoBtn');
+    const box = document.getElementById('introText');
+    if(!btn || !box) return;
+    const phone = window.matchMedia('(max-width:600px)');
+    function setOpen(open){
+      box.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    btn.addEventListener('click', (e)=>{
+      if(!phone.matches) return;            // on wide screens the text is always visible
+      e.stopPropagation();
+      setOpen(!box.classList.contains('open'));
+    });
+    document.addEventListener('click', (e)=>{
+      if(box.classList.contains('open') && !box.contains(e.target)) setOpen(false);
+    });
+    document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') setOpen(false); });
+    window.addEventListener('scroll', ()=>{ if(box.classList.contains('open')) setOpen(false); }, { passive:true });
+  })();
+
+  // ================= BACK-TO-TOP BUTTON =================
+  // Shown once you are past the same threshold the Back-button scroll guard
+  // uses. A plain smooth scroll is enough: the guard notices the page is
+  // back near the top and retires its own history entry.
+  (function wireToTop(){
+    const btn = document.getElementById('toTopBtn');
+    if(!btn) return;
+    let ticking = false;
+    function sync(){
+      ticking = false;
+      btn.classList.toggle('show', window.scrollY > SCROLL_GUARD_PX);
+    }
+    window.addEventListener('scroll', ()=>{ if(!ticking){ ticking = true; requestAnimationFrame(sync); } }, { passive:true });
+    btn.addEventListener('click', ()=>{ window.scrollTo({ top:0, behavior:'smooth' }); });
+    sync();
+  })();
+
+  // ================= SWIPE TO OPEN / CLOSE THE SIDEBAR (phones) =================
+  // Swipe right anywhere to pull the drawer out, swipe left to push it back.
+  // The drawer follows the finger; on release it snaps open/closed depending
+  // on distance or flick speed. Only a clearly horizontal drag (>1.6:1) takes
+  // over, so normal vertical scrolling is untouched, and it is disabled while
+  // a modal / the lock screen / the image viewer owns the screen, and when the
+  // touch starts on a form field.
+  (function wireSidebarSwipe(){
+    if(!sidebarDrawerEl || !sidebarOverlayEl) return;
+    const phone = window.matchMedia('(max-width:767px)');
+    let g = null;   // { x, y, t, opening, mode, dx }
+
+    function drawerW(){ return sidebarDrawerEl.offsetWidth || 300; }
+    function blocked(target){
+      if(!phone.matches) return true;
+      if(lockOverlayEl.classList.contains('open') || tripModalOpen || imgModalOverlay.classList.contains('open')) return true;
+      if(target && target.closest && target.closest('input, select, textarea, [contenteditable="true"]')) return true;
+      return false;
+    }
+    function paint(pos){
+      const p = 1 - Math.abs(pos) / drawerW();
+      sidebarDrawerEl.style.transition = 'none';
+      sidebarDrawerEl.style.transform = `translateX(${pos}px)`;
+      sidebarOverlayEl.style.transition = 'none';
+      sidebarOverlayEl.style.opacity = String(Math.max(0, Math.min(1, p)));
+    }
+    function settle(open){
+      // hand control back to the CSS transition, starting from where the finger left it
+      sidebarDrawerEl.style.transition = '';
+      sidebarOverlayEl.style.transition = '';
+      void sidebarDrawerEl.offsetWidth;
+      sidebarDrawerEl.style.transform = '';
+      sidebarOverlayEl.style.opacity = '';
+      if(open) openSidebar(); else closeSidebar();
+    }
+
+    document.addEventListener('touchstart', (e)=>{
+      g = null;
+      if(e.touches.length !== 1 || blocked(e.target)) return;
+      const t = e.touches[0];
+      g = { x:t.clientX, y:t.clientY, t:Date.now(), opening:!sidebarDrawerEl.classList.contains('open'), mode:null, dx:0 };
+    }, { passive:true });
+
+    document.addEventListener('touchmove', (e)=>{
+      if(!g) return;
+      if(e.touches.length !== 1){ if(g.mode === 'drag') settle(!g.opening); g = null; return; }
+      const t = e.touches[0];
+      const dx = t.clientX - g.x, dy = t.clientY - g.y;
+      if(g.mode === null){
+        if(Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        const horizontal = Math.abs(dx) > Math.abs(dy) * 1.6;
+        const rightWay = g.opening ? dx > 0 : dx < 0;
+        if(horizontal && rightWay) g.mode = 'drag'; else { g = null; return; }
+      }
+      g.dx = dx;
+      if(e.cancelable) e.preventDefault();
+      const W = drawerW();
+      paint(g.opening ? Math.min(0, Math.max(-W, -W + dx)) : Math.min(0, Math.max(-W, dx)));
+    }, { passive:false });
+
+    function end(cancelled){
+      if(!g || g.mode !== 'drag'){ g = null; return; }
+      const W = drawerW(), dx = g.dx, v = dx / Math.max(1, Date.now() - g.t);
+      let open;
+      if(cancelled) open = !g.opening;
+      else if(g.opening) open = dx > W * 0.3 || v > 0.4;
+      else open = !(dx < -W * 0.3 || v < -0.4);
+      g = null;
+      settle(open);
+    }
+    document.addEventListener('touchend', ()=>end(false));
+    document.addEventListener('touchcancel', ()=>end(true));
+  })();
 
   // ================= TOP-BAR QUICK SAVE (always-encrypted backup) =================
   // Mirrors the dashboard's own file-name/format for a JSON backup, but skips

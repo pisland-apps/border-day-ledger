@@ -722,6 +722,51 @@
   .set-status{height:auto; padding:8px 14px; border-top:1px solid var(--paper-dark); font-size:12px; line-height:1.5;}
   .set-status:empty{display:none;}
 
+  /* ================= v27: compact phone header, back-to-top, swipe drawer ================= */
+  .logo-btn{position:relative; flex-shrink:0; padding:0; margin:0; border:none; background:none; cursor:default; display:block; line-height:0; -webkit-tap-highlight-color:transparent;}
+  header{position:relative;}
+
+  /* back-to-top: sits directly above the ＋ button (same column, centred on it) */
+  .to-top{
+    position:fixed; right:calc(18px + 5px); bottom:calc(34px + 54px + 12px + env(safe-area-inset-bottom, 0px));
+    width:44px; height:44px; padding:0; border-radius:50%; z-index:440;
+    display:flex; align-items:center; justify-content:center;
+    background:#fff; color:var(--ink); border:1px solid var(--gold-line); cursor:pointer;
+    box-shadow:0 6px 16px -6px rgba(30,42,68,0.4);
+    opacity:0; transform:translateY(8px); pointer-events:none;
+    transition:opacity .18s ease, transform .18s ease;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .to-top.show{opacity:1; transform:none; pointer-events:auto;}
+  .to-top:active{transform:scale(0.94);}
+  .to-top svg{width:22px; height:22px;}
+  @media print{ .to-top{display:none !important;} }
+
+  @media (max-width:600px){
+    /* logo left, title beside it; the description moves into a tap-the-logo popover */
+    header{flex-direction:row; align-items:center; gap:12px; padding:14px 16px 12px;}
+    .logo-mark{width:48px; height:48px;}
+    .logo-btn{cursor:pointer;}
+    .logo-btn::after{
+      content:'i'; position:absolute; right:-3px; bottom:-3px; width:17px; height:17px; border-radius:50%;
+      background:var(--ink); color:var(--paper); border:2px solid var(--paper); box-sizing:content-box;
+      font:italic 700 11px/17px var(--serif); text-align:center;
+    }
+    .header-text{min-width:0;}
+    .eyebrow{font-size:9.5px; letter-spacing:0.1em; margin-bottom:2px;}
+    h1{font-size:26px; margin:0; line-height:1.2;}
+    header .sub{display:none;}
+    header .sub.open{
+      display:block; position:absolute; z-index:30; left:12px; right:12px; top:calc(100% + 8px);
+      max-width:none; padding:12px 14px; font-size:13px; line-height:1.65; color:var(--ink-soft);
+      background:#fff; border:1px solid var(--gold-line); border-radius:8px; box-shadow:var(--card-shadow);
+    }
+    header .sub.open::before{
+      content:''; position:absolute; top:-6px; left:30px; width:10px; height:10px; background:#fff;
+      border-left:1px solid var(--gold-line); border-top:1px solid var(--gold-line); transform:rotate(45deg);
+    }
+  }
+
   .app-body-layout{display:block;}
 
   @media (min-width:768px){
@@ -993,6 +1038,7 @@
 
 <div class="app-main-col">
 <header>
+  <button type="button" class="logo-btn" id="logoBtn" aria-label="关于本工具" aria-expanded="false" aria-controls="introText">
   <svg class="logo-mark" viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <style>
@@ -1037,10 +1083,11 @@
       </g>
     </g>
   </svg>
+  </button>
   <div class="header-text">
     <div class="eyebrow">Border Day Ledger · 出入境天数记录簿</div>
     <h1>关口记录簿</h1>
-    <div class="sub">按年统计你在马来西亚、新加坡及其他国家的停留天数 —— 方便核对税务居民身份等所需的天数门槛。数据仅保存在你的账号下。</div>
+    <div class="sub" id="introText">按年统计你在马来西亚、新加坡及其他国家的停留天数 —— 方便核对税务居民身份等所需的天数门槛。数据仅保存在你的账号下。</div>
   </div>
 </header>
 
@@ -1070,6 +1117,10 @@
 
 <button type="button" class="fab" id="addTripFab" aria-label="新增行程" title="新增行程">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+</button>
+
+<button type="button" class="to-top" id="toTopBtn" aria-label="回到顶部" title="回到顶部">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg>
 </button>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

@@ -241,7 +241,22 @@ unchanged. Button captions got shorter (指纹 button: 启用 / 关闭 / 不支�
 说明: 查看 / 收起; print + archive toggles: … / 收起). The plaintext warning is
 shown only while 导出加密 is off. `#saveStatus` is hidden while empty.
 
+## v27: compact phone header, back-to-top button, swipe drawer
+
+- **Header (≤600px):** logo left, eyebrow + title beside it. The description
+  (`#introText`) is hidden and shown as a popover when the logo (`#logoBtn`,
+  marked with a tiny "i") is tapped; tap outside / scroll / Esc closes it.
+  Wide screens are unchanged (text always visible, logo not interactive).
+- **Back-to-top (`#toTopBtn`):** there was none before. Appears after
+  `SCROLL_GUARD_PX`, sits directly above the ＋ FAB (same column, z-index 440).
+  Plain smooth scroll; the Back-button scroll guard retires its own entry.
+- **Swipe (≤767px):** swipe right anywhere opens the drawer, left closes it,
+  following the finger. Requires a clearly horizontal drag (>1.6:1); disabled
+  under modals / lock screen / image viewer and when the touch starts on a
+  form field. Inline transform/opacity are cleared in `settle()` so the CSS
+  transition finishes the motion.
+
 ## Current versions
 
-- `APP_VERSION`: `v26` (`app.js`)
-- `CACHE_NAME`: `border-day-ledger-cache-v26` (`sw.js`)
+- `APP_VERSION`: `v27` (`app.js`)
+- `CACHE_NAME`: `border-day-ledger-cache-v27` (`sw.js`)
