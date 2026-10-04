@@ -42,7 +42,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v29';
+  const APP_VERSION = 'v30';
   const APP_VERSION_DATE = '2026-10-04';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
@@ -3207,7 +3207,6 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   (function wireSidebarSwipe(){
     if(!sidebarDrawerEl || !sidebarOverlayEl) return;
     const phone = window.matchMedia('(max-width:767px)');
-    const SWIPE_EDGE_GUARD_PX = 24;
     let g = null;   // { x, y, t, opening, mode, dx }
 
     function drawerW(){ return sidebarDrawerEl.offsetWidth || 300; }
@@ -3238,9 +3237,11 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       g = null;
       if(e.touches.length !== 1 || blocked(e.target)) return;
       const t = e.touches[0];
-      // v29: a touch that starts in the outer ~24px of either screen edge belongs to
-      // Android's system back gesture, not to the drawer swipe
-      if(t.clientX < SWIPE_EDGE_GUARD_PX || t.clientX > window.innerWidth - SWIPE_EDGE_GUARD_PX) return;
+      // v30: no edge guard. v29 ignored touches starting in the outer 24px to avoid
+      // Android's back gesture, but that is exactly where a "pull the drawer out"
+      // swipe naturally starts, and it made the swipe fail most of the time. If the
+      // system back gesture claims a touch the page never gets it (or gets a
+      // touchcancel, which already settles the drawer back).
       g = { x:t.clientX, y:t.clientY, t:Date.now(), opening:!sidebarDrawerEl.classList.contains('open'), mode:null, dx:0 };
     }, { passive:true });
 
