@@ -7,7 +7,7 @@
 // near the top of app.js (the small version badge shown bottom-right,
 // even on the lock screen) — they live in different files. Bump BOTH by
 // hand on every deploy. See the deploy checklist in README.md.
-const CACHE_NAME = 'border-day-ledger-cache-v32';
+const CACHE_NAME = 'border-day-ledger-cache-v33';
 
 // './index.html' is deliberately NOT in this list. Cloudflare Pages
 // 301/308-redirects /index.html -> / (it strips the .html extension), so
@@ -30,7 +30,10 @@ const APP_SHELL = [
   './apple-touch-icon.png',
   './lib/pdf.min.mjs',
   './lib/pdf.worker.min.mjs',
-  './lib/jszip.min.js'
+  './lib/jszip.min.js',
+  './lib/wasm/jbig2.wasm',
+  './lib/wasm/openjpeg.wasm',
+  './lib/wasm/qcms_bg.wasm'
 ];
 
 self.addEventListener('install', (event) => {

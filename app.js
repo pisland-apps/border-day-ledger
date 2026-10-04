@@ -42,7 +42,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v32';
+  const APP_VERSION = 'v33';
   const APP_VERSION_DATE = '2026-10-04';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
@@ -1003,7 +1003,11 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       const bytes = new Uint8Array(binary.length);
       for(let i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-      const pdf = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
+      // wasmUrl is required since pdf.js 5+: scanner PDFs (CCITT G4 / JBIG2) and
+      // JPEG2000 images are decoded by the .wasm files in ./lib/wasm/. Without
+      // it those images fail to decode and the page renders blank (v33 fix).
+      const wasmUrl = new URL('lib/wasm/', document.baseURI).href;
+      const pdf = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false, wasmUrl }).promise;
       if(token !== pdfRenderToken) return; // user moved on before this resolved
 
       imgModalPdfWrap.innerHTML = '';

@@ -256,6 +256,14 @@ shown only while 导出加密 is off. `#saveStatus` is hidden while empty.
   form field. Inline transform/opacity are cleared in `settle()` so the CSS
   transition finishes the motion.
 
+## v33: scanner PDFs showed blank pages — pdf.js wasm files added
+
+Symptom: PDFs saved by a flatbed scanner (EPSON Scan, 1-bit CCITT G4 images) opened in the attachment viewer as blank white pages, while ordinary PDFs (e.g. a phone bill) rendered fine. Not caused by the v32 pdf.js bump — 6.2.108 behaves the same. Cause: since pdf.js 5 the CCITT / JBIG2 / JPEG2000 image decoders (and the ICC colour module) are WebAssembly files that must be supplied through the `wasmUrl` option of `getDocument()`. The app never passed it, so pdf.js logged "JBig2 failed to initialize" / "Ensure that the `wasmUrl` API parameter is provided" and drew nothing for those images.
+
+Fix: `lib/wasm/` now holds `jbig2.wasm`, `openjpeg.wasm`, `qcms_bg.wasm` and their licence files (from pdfjs-dist 6.4.299); `app.js` passes `wasmUrl` (absolute URL of `lib/wasm/`); the three `.wasm` files are in `sw.js` `APP_SHELL` so they work offline; CSP `script-src` is now `'self' 'wasm-unsafe-eval'` in both the `index.html` meta tag and `_headers` (needed to compile WebAssembly; it does not allow `eval()` or inline script). `APP_VERSION` / `CACHE_NAME` → v33.
+
+When updating pdf.js later, copy `wasm/` from the same pdfjs-dist version together with the two `.mjs` files.
+
 ## v32: pdf.js updated 6.2.108 → 6.4.299
 
 Vendored `lib/pdf.min.mjs` + `lib/pdf.worker.min.mjs` replaced with the pdfjs-dist 6.4.299 `build/` files (the latest on npm at the time). File names, the ESM-only layout and the API calls the app uses (`GlobalWorkerOptions.workerSrc`, `getDocument({ data, isEvalSupported: false })`, `getPage` / `getViewport` / `render`) are unchanged, so it was a plain file swap with no code changes besides the version comments. `APP_VERSION` and `CACHE_NAME` bumped to v32 so returning visitors pick up the new files. The CSP in `_headers` is unchanged (`script-src 'self'`, `worker-src 'self'`).
@@ -319,5 +327,5 @@ Decisions: minimum passcode length is **6**; **no unlock throttling** (skipped o
 
 ## Current versions
 
-- `APP_VERSION`: `v32` (`app.js`)
-- `CACHE_NAME`: `border-day-ledger-cache-v32` (`sw.js`)
+- `APP_VERSION`: `v33` (`app.js`)
+- `CACHE_NAME`: `border-day-ledger-cache-v33` (`sw.js`)
