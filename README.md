@@ -256,6 +256,15 @@ shown only while 导出加密 is off. `#saveStatus` is hidden while empty.
   form field. Inline transform/opacity are cleared in `settle()` so the CSS
   transition finishes the motion.
 
+## v29: edge-swipe guard, backup age, counting rule, print alignment
+
+v28 was checked on the real phone (deploy, passcode migration, lock/unlock, import) — all OK; biometric unlock does not work on that phone, so it was not tested.
+
+- **Edge-swipe guard:** a touch that starts within 24 px of either screen edge no longer starts the sidebar swipe, so it does not fight Android's system back gesture (`SWIPE_EDGE_GUARD_PX`).
+- **Backup-age indicator:** `settings.lastBackupAt` is stamped whenever a backup file is produced (JSON, ZIP, or the top-bar 💾). The drawer shows "上次备份：N 天前" under the backup buttons (red when never backed up or older than `BACKUP_STALE_DAYS` = 30), and one toast per page load reminds you after unlock. It records that a file was created, not that it was copied somewhere safe — keep a copy off the phone.
+- **Day-counting rule, written down:** both the departure day and the return day count as full days; a same-day trip counts as 1 day. The trip popup now says so and shows a live "共 N 天" under the two date fields. Days with no trip recorded count at the base location. Two trips that strictly overlap count the shared days for both places (v28 shows a warning when you save one).
+- **Print report agrees with the screen:** thresholds are judged on days elapsed through the report date. For the current year the report shows the counted figures plus a separate line with the full-year estimate (planned trips already entered + base location); trips that start after today are marked "(planned)". Finished years are unchanged; a year that has not started shows zero counted days.
+
 ## v28: security and robustness pass (full review of v27)
 
 Decisions: minimum passcode length is **6**; **no unlock throttling** (skipped on purpose).
@@ -298,5 +307,5 @@ Decisions: minimum passcode length is **6**; **no unlock throttling** (skipped o
 
 ## Current versions
 
-- `APP_VERSION`: `v28` (`app.js`)
-- `CACHE_NAME`: `border-day-ledger-cache-v28` (`sw.js`)
+- `APP_VERSION`: `v29` (`app.js`)
+- `CACHE_NAME`: `border-day-ledger-cache-v29` (`sw.js`)

@@ -974,6 +974,7 @@
         <button type="button" class="btn ghost sm" id="exportBtn">导出为 JSON</button>
         <button type="button" class="btn ghost sm" id="exportZipBtn">导出为 ZIP</button>
       </div>
+      <div class="set-hint" id="backupAgeHint" style="margin-top:6px;"></div>
     </div>
     <div class="set-row stack">
       <div class="set-label">恢复数据</div>
@@ -1163,6 +1164,9 @@
           <div class="field">
             <label for="endDate">返回日期</label>
             <input type="date" id="endDate" required>
+          </div>
+          <div class="field span-2">
+            <div class="set-hint" id="tripDaysHint" style="margin-top:0;">计算方式：出发日和返回日都算整天，当天往返算 1 天。</div>
           </div>
           <div class="field span-2">
             <label for="routeDetail">路线（可选）</label>

@@ -42,7 +42,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v28';
+  const APP_VERSION = 'v29';
   const APP_VERSION_DATE = '2026-10-04';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
@@ -1262,6 +1262,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       settings = s ? JSON.parse(s.value) : { base:'SG' };
     }catch(e){ settings = { base:'SG' }; }
     baseLocationEl.value = settings.base || 'SG';
+    refreshBackupHint();
     render();
   }
 
@@ -1271,6 +1272,46 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     if(ok) flashStatus('已保存');
     else flashRetryableError('保存失败', saveTrips);
     return !!ok;
+  }
+
+  // ---- v29: backup-age indicator ----------------------------------------
+  // settings.lastBackupAt (ISO string) is stamped when a backup file has been
+  // produced (JSON, ZIP or the top-bar save). It lives in the encrypted
+  // settings record. It records that a file was created, not that it is safe
+  // somewhere else — the hint says so.
+  const BACKUP_STALE_DAYS = 30;
+  function backupAgeDays(){
+    const t = settings && settings.lastBackupAt ? Date.parse(settings.lastBackupAt) : NaN;
+    if(!isFinite(t)) return null;
+    return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+  }
+  function refreshBackupHint(){
+    const el = document.getElementById('backupAgeHint');
+    if(!el) return;
+    const d = backupAgeDays();
+    let text, warn = false;
+    if(d === null){ text = '还没有备份过。数据只保存在这个浏览器里，建议现在导出一份并存到手机以外的地方。'; warn = true; }
+    else {
+      const when = d === 0 ? '今天' : d + ' 天前';
+      text = '上次备份：' + when + '（' + settings.lastBackupAt.slice(0,10) + '）';
+      if(d >= BACKUP_STALE_DAYS){ text += '，已超过 ' + BACKUP_STALE_DAYS + ' 天，建议重新备份'; warn = true; }
+    }
+    el.textContent = text;
+    el.classList.toggle('warn', warn);
+  }
+  async function recordBackupDone(){
+    settings.lastBackupAt = new Date().toISOString();
+    try{ await saveSettings(); }catch(e){}
+    refreshBackupHint();
+  }
+  let backupReminderShown = false;
+  function maybeShowBackupReminder(){
+    if(backupReminderShown) return;
+    backupReminderShown = true;
+    const d = backupAgeDays();
+    if(d === null || d >= BACKUP_STALE_DAYS){
+      showToast(d === null ? '还没有备份过数据，点右上角 💾 保存一份加密备份。' : '已 ' + d + ' 天没有备份，点右上角 💾 保存一份加密备份。', { duration: 6000 });
+    }
   }
 
   async function saveSettings(){
@@ -1382,6 +1423,27 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     }
   }
 
+  // v29: live "共 N 天" under the two date fields (both end days count)
+  function refreshTripDaysHint(){
+    const el = document.getElementById('tripDaysHint');
+    if(!el) return;
+    const a = document.getElementById('startDate').value;
+    const b = document.getElementById('endDate').value;
+    const rule = '出发日和返回日都算整天，当天往返算 1 天。';
+    if(isRealISODate(a) && isRealISODate(b)){
+      if(b < a){ el.textContent = '返回日期早于出发日期，请检查。'; el.classList.add('warn'); return; }
+      el.classList.remove('warn');
+      el.textContent = '共 ' + daysInclusive(a, b) + ' 天（' + rule + '）';
+      return;
+    }
+    el.classList.remove('warn');
+    el.textContent = '计算方式：' + rule;
+  }
+  ['startDate','endDate'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el){ el.addEventListener('input', refreshTripDaysHint); el.addEventListener('change', refreshTripDaysHint); }
+  });
+
   // v28: a trip that strictly overlaps another one counts the shared days for
   // both places (a same-day return + departure is NOT an overlap)
   function overlapWarning(selfId, start, end){
@@ -1461,6 +1523,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     history.pushState({ tripModal:true }, '');
     tripModalHistoryPushed = true;
     tripModalBodyEl.scrollTop = 0;
+    refreshTripDaysHint();
     tripModalEl.focus({ preventScroll:true });
   }
 
@@ -2053,9 +2116,11 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     if(result.encrypted){
       triggerDownload(new Blob([result.envelopeJSON], { type:'application/json' }), `border-day-ledger-${today}.encrypted.json`);
       flashStatus('已导出加密备份（JSON）');
+      await recordBackupDone();
     } else {
       triggerDownload(new Blob([jsonText], { type:'application/json' }), `border-day-ledger-${today}.json`);
       flashStatus('已导出 JSON（含图片，未加密）');
+      await recordBackupDone();
     }
   }
 
@@ -2100,9 +2165,11 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       if(result.encrypted){
         triggerDownload(new Blob([result.envelopeJSON], { type:'application/json' }), `border-day-ledger-${today}.encrypted.json`);
         flashStatus('已导出加密备份（ZIP）');
+        await recordBackupDone();
       } else {
         triggerDownload(blob, `border-day-ledger-${today}.zip`);
         flashStatus('已导出 ZIP（含图片，未加密）');
+        await recordBackupDone();
       }
     }catch(e){
       console.error('[border-ledger] ZIP export failed', e);
@@ -2254,6 +2321,21 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     if(year) archiveYear(year);
   });
 
+  // v29: what the printed report counts. Same rule as the on-screen year card:
+  // thresholds are judged on days ELAPSED through today. For a finished year
+  // that is the whole year; for the current year the rest is only an estimate
+  // (planned trips already entered + base location) and is shown separately.
+  function printCountsFor(year, fallback){
+    const yd = computeYearlyData().find(x => x.year === year);
+    if(!yd) return { counted: fallback, partial: false, notStarted: false, yd: null };
+    return {
+      counted: yd.elapsed,
+      partial: yd.projectedDays > 0 && yd.elapsedDays > 0,
+      notStarted: yd.elapsedDays === 0,
+      yd
+    };
+  }
+
   function preparePrintView(year){
     year = Number(year);
     const totalDays = isLeap(year) ? 366 : 365;
@@ -2285,19 +2367,34 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       return t.otherName || 'Other';
     }
 
+    const pc0Today = localTodayISO();
+    const pc0Planned = (t) => t.start > pc0Today;
     const rows = relevantTrips.map(({t, daysInYear})=>{
       return `<tr>
         <td>${escapeHtml(destLabelEn(t))}</td>
         <td>${t.start}</td>
         <td>${t.end}</td>
-        <td>${daysInYear} days</td>
+        <td>${daysInYear} days${pc0Planned(t) ? ' (planned)' : ''}</td>
         <td>${transportLabelEn(t)}</td>
         <td>${t.route ? escapeHtml(t.route) : '—'}</td>
         <td>${t.note ? escapeHtml(t.note) : '—'}</td>
       </tr>`;
     }).join('');
 
-    const otherListEn = Object.entries(otherBreakdown)
+    // full-year figures above (myDays/sgDays/otherDays) = estimate incl. the
+    // not-yet-happened part; the headline numbers are the elapsed ones
+    const pc = printCountsFor(year, { my: myDays, sg: sgDays, other: otherDays, otherBreakdown });
+    const fullMy = myDays, fullSg = sgDays;
+    myDays = pc.counted.my; sgDays = pc.counted.sg; otherDays = pc.counted.other;
+    const shownBreakdown = pc.counted.otherBreakdown || {};
+    const todayISO = pc.yd ? pc.yd.today : '';
+    let countedLine = '';
+    if(pc.notStarted){
+      countedLine = `${year} has not started yet. Nothing is counted; the figures below are only an estimate from trips already entered plus the base location: Malaysia ${fullMy} / Singapore ${fullSg} days.`;
+    } else if(pc.partial){
+      countedLine = `Counted through ${todayISO} (${pc.yd.elapsedDays} of ${pc.yd.totalDays} days). The remaining ${pc.yd.projectedDays} days of ${year} are not counted; full-year estimate from planned trips already entered plus the base location: Malaysia ${fullMy} / Singapore ${fullSg} days.`;
+    }
+    const otherListEn = Object.entries(shownBreakdown)
       .sort((a,b)=>b[1]-a[1])
       .map(([name,days])=>`<span class="stamp other">${escapeHtml(name)} <span class="n">${days}</span> days</span>`)
       .join('');
@@ -2336,6 +2433,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
         </div>
       </div>
       <div style="margin-bottom:14px;"></div>
+      ${countedLine ? `<div class="print-sub" style="margin-bottom:8px;">${escapeHtml(countedLine)}</div>` : ''}
       <div class="print-stamp-row">
         <span class="stamp my">Malaysia <span class="n">${myDays}</span> days</span>
         <span class="stamp sg">Singapore <span class="n">${sgDays}</span> days</span>
@@ -2344,10 +2442,11 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       </div>
       <table class="print-table">
         <thead><tr><th>Destination</th><th>Departure</th><th>Return</th><th>Days in ${year}</th><th>Transport</th><th>Route</th><th>Note</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="7">No trips recorded this year (entire year counted as base location)</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="7">No trips recorded this year (all days counted at the base location)</td></tr>'}</tbody>
       </table>
       <div class="print-footer">
         Malaysia 182-day threshold: ${myDays} / 182 ${myHit?'(reached)':''}&nbsp;&nbsp;&middot;&nbsp;&nbsp;Singapore 183-day threshold: ${sgDays} / 183 ${sgHit?'(reached)':''}<br>
+        Thresholds are judged on days that have already elapsed${todayISO ? ' (through ' + todayISO + ')' : ''}; days not yet reached are never counted. Days with no trip recorded are counted at the base location.<br>
         Day counts use a simplified method where both departure and return dates count as full days. For official rules, please refer to LHDN / IRAS guidance or a qualified tax advisor.
       </div>
     `;
@@ -3026,7 +3125,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   });
 
   function maybeShowWeakPasscodeNotice(){
-    if(!weakPasscodeAtUnlock) return;
+    if(!weakPasscodeAtUnlock){ maybeShowBackupReminder(); return; }
     weakPasscodeAtUnlock = false;
     showToast('当前密码少于 ' + MIN_PASSCODE_LEN + ' 位，建议在设置里更改密码。', { duration: 6000 });
   }
@@ -3108,6 +3207,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   (function wireSidebarSwipe(){
     if(!sidebarDrawerEl || !sidebarOverlayEl) return;
     const phone = window.matchMedia('(max-width:767px)');
+    const SWIPE_EDGE_GUARD_PX = 24;
     let g = null;   // { x, y, t, opening, mode, dx }
 
     function drawerW(){ return sidebarDrawerEl.offsetWidth || 300; }
@@ -3138,6 +3238,9 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       g = null;
       if(e.touches.length !== 1 || blocked(e.target)) return;
       const t = e.touches[0];
+      // v29: a touch that starts in the outer ~24px of either screen edge belongs to
+      // Android's system back gesture, not to the drawer swipe
+      if(t.clientX < SWIPE_EDGE_GUARD_PX || t.clientX > window.innerWidth - SWIPE_EDGE_GUARD_PX) return;
       g = { x:t.clientX, y:t.clientY, t:Date.now(), opening:!sidebarDrawerEl.classList.contains('open'), mode:null, dx:0 };
     }, { passive:true });
 
@@ -3226,6 +3329,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       const today = new Date().toISOString().slice(0,10);
       triggerDownload(new Blob([JSON.stringify(envelope)], { type:'application/json' }), `border-day-ledger-${today}.encrypted.json`);
       flashStatus('已保存（使用访问密码加密）');
+      await recordBackupDone();
     }catch(e){
       console.error('[border-ledger] quick save failed', e);
       alert('保存失败，请稍后重试。');
