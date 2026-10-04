@@ -7,7 +7,7 @@
 // near the top of app.js (the small version badge shown bottom-right,
 // even on the lock screen) — they live in different files. Bump BOTH by
 // hand on every deploy. See the deploy checklist in README.md.
-const CACHE_NAME = 'border-day-ledger-cache-v27';
+const CACHE_NAME = 'border-day-ledger-cache-v28';
 
 // './index.html' is deliberately NOT in this list. Cloudflare Pages
 // 301/308-redirects /index.html -> / (it strips the .html extension), so
@@ -51,65 +51,54 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// v28: only the app-shell files themselves are ever written to the cache
+// (exact URLs, no query-string variants, no redirected or opaque responses),
+// the offline fallback can never be `undefined` (that made respondWith throw),
+// and requests to other origins are not intercepted at all — the CSP already
+// blocks them (connect-src / script-src 'self').
+const SHELL_URLS = new Set(APP_SHELL.map((p) => new URL(p, self.location).href));
+
+function shellCacheable(url, res){
+  return !!res && res.ok && !res.redirected && res.type === 'basic' && SHELL_URLS.has(url.href);
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if(req.method !== 'GET') return;
 
   const url = new URL(req.url);
+  if(url.origin !== self.location.origin) return;
 
-  if(url.origin === self.location.origin){
-    // Navigations (address-bar loads, installed-shortcut relaunches, links)
-    // are always resolved through the canonical './' cache entry — not
-    // whatever exact path the browser requested. That's what makes a stale
-    // /index.html shortcut/bookmark keep working instead of hitting a dead
-    // cache slot, and it ensures we never fetch or cache a Response with
-    // redirected:true for a navigation (see APP_SHELL comment above).
-    if(req.mode === 'navigate'){
-      event.respondWith(
-        caches.match('./').then((cached) => {
-          const network = fetch('./').then((res) => {
-            if(res && res.ok){
-              const resClone = res.clone();
-              caches.open(CACHE_NAME).then((cache) => cache.put('./', resClone));
-            }
-            return res;
-          }).catch(() => cached);
-          return cached || network;
-        })
-      );
-      return;
-    }
-
-    // app shell: cache-first, refresh the cache in the background when online
+  // Navigations (address-bar loads, installed-shortcut relaunches, links) are
+  // always resolved through the canonical './' cache entry — see the APP_SHELL
+  // comment above for why './index.html' is not cached.
+  if(req.mode === 'navigate'){
     event.respondWith(
-      caches.match(req).then((cached) => {
-        const network = fetch(req).then((res) => {
-          if(res && res.ok){
+      caches.match('./').then((cached) => {
+        const network = fetch('./').then((res) => {
+          if(res && res.ok && !res.redirected){
             const resClone = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
+            caches.open(CACHE_NAME).then((cache) => cache.put('./', resClone));
           }
           return res;
-        }).catch(() => cached);
+        }).catch(() => cached || Response.error());
         return cached || network;
       })
     );
     return;
   }
 
-  // Cross-origin fallback — kept as a defensive no-op path. As of this
-  // version there are no cross-origin requests left in this app: JSZip
-  // was moved to ./lib/jszip.min.js (same-origin, handled by the app-shell
-  // branch above) alongside pdf.js, and connect-src is 'self' only. This
-  // branch only fires if something cross-origin is ever added back later.
-  // (Not reachable for navigations — those are caught by the same-origin
-  // branch above — so no redirected-cache-key fallback is needed here.)
+  // app shell: cache-first, refreshed in the background when online
   event.respondWith(
-    fetch(req).then((res) => {
-      if(res && res.ok){
-        const resClone = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
-      }
-      return res;
-    }).catch(() => caches.match(req))
+    caches.match(req).then((cached) => {
+      const network = fetch(req).then((res) => {
+        if(shellCacheable(url, res)){
+          const resClone = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone));
+        }
+        return res;
+      }).catch(() => cached || Response.error());
+      return cached || network;
+    })
   );
 });

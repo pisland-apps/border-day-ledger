@@ -42,8 +42,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v27';
-  const APP_VERSION_DATE = '2026-09-20';
+  const APP_VERSION = 'v28';
+  const APP_VERSION_DATE = '2026-10-04';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
   // the lock screen before the password is entered.
@@ -193,7 +193,9 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // {iv, ct} envelope. The derived key only ever lives in memory for the
   // current session — nothing about the passcode itself is ever stored.
   // ---------------------------------------------------------------------
-  const PBKDF2_ITERATIONS = 210000;
+  const PBKDF2_ITERATIONS = 600000; // v28: raised from 210000 (existing vaults are migrated at next unlock)
+  const MIN_PASSCODE_LEN = 6;        // v28: minimum length for NEW passcodes (setup, change, backup password)
+  const MAX_IMPORT_ITERATIONS = 5000000; // sanity cap for iteration counts read from imported files
   const LOCK_META_KEY = 'border-ledger:lock-meta';
   const LOCK_CHECK_PLAINTEXT = 'border-ledger-unlock-check-v1';
   let sessionKey = null; // CryptoKey, in-memory only
@@ -248,7 +250,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // is null, for the very first setup) and rewrites it encrypted under
   // `newKey`. Used both for first-time setup (migrating any pre-existing
   // unencrypted data) and for changing the passcode later.
-  async function reencryptAllData(oldKey, newKey){
+  async function reencryptAllData(oldKey, newKey, backup){
     async function readPlain(rec){
       if(!rec) return null;
       if(!oldKey) return rec.value;
@@ -268,17 +270,30 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     let tripsArr = [];
     if(tripsPlain){ try{ tripsArr = JSON.parse(tripsPlain) || []; }catch(e){ tripsArr = []; } }
 
-    if(tripsPlain !== null) await writeEncrypted(STORAGE_TRIPS_KEY, tripsPlain);
-    if(settingsPlain !== null) await writeEncrypted(STORAGE_SETTINGS_KEY, settingsPlain);
-
+    // v28: read + decrypt EVERYTHING first, then write. If a write fails
+    // part-way, the caller can restore every record under the old key from
+    // `backup` (the collected plaintexts) instead of leaving a mix of keys.
+    const entries = [];
+    if(tripsPlain !== null) entries.push({ k: STORAGE_TRIPS_KEY, plain: tripsPlain });
+    if(settingsPlain !== null) entries.push({ k: STORAGE_SETTINGS_KEY, plain: settingsPlain });
     for(const t of tripsArr){
       const ids = t.imageIds || (t.hasImage ? ['legacy'] : []);
       for(const imgId of ids){
         const k = imageStorageKey(t.id, imgId);
         const rec = await rawStorage.get(k, false).catch(()=>null);
         const plain = await readPlain(rec);
-        if(plain !== null) await writeEncrypted(k, plain);
+        if(plain !== null) entries.push({ k, plain });
       }
+    }
+    if(Array.isArray(backup)) entries.forEach(e => backup.push(e));
+    for(const e of entries) await writeEncrypted(e.k, e.plain);
+  }
+
+  // Best-effort restore of every collected record under `key` (rollback path).
+  async function restoreEntries(entries, key){
+    for(const e of entries){
+      const env = await aesEncryptString(key, e.plain);
+      await rawStorage.set(e.k, JSON.stringify(env), false);
     }
   }
 
@@ -314,7 +329,31 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     const key = await verifyPasscodeAgainstMeta(passcode, meta);
     if(!key) return false;
     sessionKey = key;
+    weakPasscodeAtUnlock = passcode.length < MIN_PASSCODE_LEN;
+    await upgradeKdfIfNeeded(passcode, meta, key);
     return true;
+  }
+
+  // v28: vaults created with fewer PBKDF2 iterations are re-keyed (new salt,
+  // current iteration count) the first time the correct passcode is entered.
+  // Rollback-safe: if anything fails, every record is restored under the old
+  // key and the old lock-meta stays in place, so nothing becomes unreadable.
+  let weakPasscodeAtUnlock = false;
+  async function upgradeKdfIfNeeded(passcode, meta, oldKey){
+    if((Number(meta.iterations) || 0) >= PBKDF2_ITERATIONS) return;
+    const backup = [];
+    try{
+      const newSalt = randomBytes(16);
+      const newKey = await deriveKey(passcode, newSalt, PBKDF2_ITERATIONS);
+      await reencryptAllData(oldKey, newKey, backup);
+      const check = await aesEncryptString(newKey, LOCK_CHECK_PLAINTEXT);
+      await saveLockMeta({ v:1, salt: bufToB64(newSalt), iterations: PBKDF2_ITERATIONS, check });
+      sessionKey = newKey;
+    }catch(e){
+      console.error('[border-ledger] KDF upgrade failed, rolling back', e);
+      try{ await restoreEntries(backup, oldKey); }catch(e2){ console.error('[border-ledger] KDF rollback failed', e2); }
+      sessionKey = oldKey;
+    }
   }
 
   async function changePasscode(oldPass, newPass){
@@ -325,9 +364,16 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
 
     const newSalt = randomBytes(16);
     const newKey = await deriveKey(newPass, newSalt, PBKDF2_ITERATIONS);
-    await reencryptAllData(oldKey, newKey);
-    const check = await aesEncryptString(newKey, LOCK_CHECK_PLAINTEXT);
-    await saveLockMeta({ v:1, salt: bufToB64(newSalt), iterations: PBKDF2_ITERATIONS, check });
+    const backup = [];
+    try{
+      await reencryptAllData(oldKey, newKey, backup);
+      const check = await aesEncryptString(newKey, LOCK_CHECK_PLAINTEXT);
+      await saveLockMeta({ v:1, salt: bufToB64(newSalt), iterations: PBKDF2_ITERATIONS, check });
+    }catch(e){
+      try{ await restoreEntries(backup, oldKey); }catch(e2){ console.error('[border-ledger] passcode-change rollback failed', e2); }
+      sessionKey = oldKey;
+      throw new Error('change-failed');
+    }
     sessionKey = newKey;
     // the old passcode is no longer valid — any biometric-wrapped copy of it
     // is now stale, so drop it rather than leave a silent way in with a dead passcode
@@ -716,8 +762,24 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // string to be `data:<image or pdf mime>;base64,<valid base64 chars>` with
   // nothing else allowed after it.
   const ATTACHMENT_DATA_URL_RE = /^data:(image\/[a-z0-9.+-]+|application\/pdf);base64,[A-Za-z0-9+/]+={0,2}$/i;
+  // v28: size cap + magic-byte check. The base64 payload must actually start
+  // like the type it claims (JPEG / PNG / WebP / GIF image, or a %PDF file).
+  const MAX_ATTACHMENT_DATAURL_CHARS = 14 * 1024 * 1024;
+  function sniffAttachmentMime(b64){
+    if(b64.startsWith('/9j/')) return 'image/jpeg';
+    if(b64.startsWith('iVBORw0KGgo')) return 'image/png';
+    if(b64.startsWith('UklGR')) return 'image/webp';
+    if(b64.startsWith('R0lGOD')) return 'image/gif';
+    if(b64.startsWith('JVBERi')) return 'application/pdf';
+    return null;
+  }
   function isSupportedAttachmentDataURL(s){
-    return typeof s === 'string' && ATTACHMENT_DATA_URL_RE.test(s);
+    if(typeof s !== 'string' || s.length > MAX_ATTACHMENT_DATAURL_CHARS) return false;
+    if(!ATTACHMENT_DATA_URL_RE.test(s)) return false;
+    const sniffed = sniffAttachmentMime(s.slice(s.indexOf(',') + 1, s.indexOf(',') + 17));
+    if(!sniffed) return false;
+    const claimsPdf = /^data:application\/pdf/i.test(s);
+    return claimsPdf === (sniffed === 'application/pdf');
   }
 
   // PDFs are stored as-is (no client-side compression available like the
@@ -941,7 +1003,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       const bytes = new Uint8Array(binary.length);
       for(let i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+      const pdf = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise;
       if(token !== pdfRenderToken) return; // user moved on before this resolved
 
       imgModalPdfWrap.innerHTML = '';
@@ -1208,6 +1270,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     const ok = await setVerified(STORAGE_TRIPS_KEY, payload);
     if(ok) flashStatus('已保存');
     else flashRetryableError('保存失败', saveTrips);
+    return !!ok;
   }
 
   async function saveSettings(){
@@ -1289,7 +1352,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
           showToast('⚠️ ' + msg, { duration:7000, actionLabel:'重新编辑', action:()=>startEdit(editId) });
         }else{
           flashStatus('已更新记录');
-          showToast('已更新记录');
+          showToast('已更新记录' + overlapWarning(editId, start, end), { duration: 4500 });
         }
       }
     } else {
@@ -1314,9 +1377,16 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
         flashRetryableError(msg, ()=>startEdit(newId));
         showToast('⚠️ ' + msg, { duration:7000, actionLabel:'重新编辑', action:()=>startEdit(newId) });
       }else{
-        showToast('已添加行程');
+        showToast('已添加行程' + overlapWarning(newId, start, end), { duration: 4500 });
       }
     }
+  }
+
+  // v28: a trip that strictly overlaps another one counts the shared days for
+  // both places (a same-day return + departure is NOT an overlap)
+  function overlapWarning(selfId, start, end){
+    const hit = trips.some(t => t.id !== selfId && t.start < end && t.end > start);
+    return hit ? ' · ⚠️ 与另一条行程的日期重叠，重叠的天数会被重复计入' : '';
   }
 
   async function startEdit(id){
@@ -1592,11 +1662,10 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
         else if(t.dest==='SG') sgDays += d;
         else {
           otherDays += d;
-          const key = t.otherName || '其他';
+          const key = countryDisplayName(t.otherName);
           otherBreakdown[key] = (otherBreakdown[key]||0) + d;
         }
       });
-      const accountedAway = myDays + sgDays + otherDays - (settings.base==='MY'?myDays:0) - (settings.base==='SG'?sgDays:0);
       // remaining days go to base
       let remaining = totalDays - myDays - sgDays - otherDays;
       if(remaining < 0) remaining = 0; // overlapping entries safeguard
@@ -1942,7 +2011,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     const pass = await showPassPrompt({
       title: '设置备份密码',
       subtitle: '为这份导出文件设置一个密码，恢复时需要输入相同密码解密。请妥善保管此密码——忘记将无法恢复这份备份。',
-      confirmField: true, cancelable: true, submitLabel: '加密并导出', minLength: 4
+      confirmField: true, cancelable: true, submitLabel: '加密并导出', minLength: MIN_PASSCODE_LEN
     });
     if(pass === null) return null;
 
@@ -2067,7 +2136,13 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       }catch(e){ /* fall through to the normal passcode-prompt path below */ }
     }
 
+    const importIterations = Number(envelope.iterations) || PBKDF2_ITERATIONS;
+    if(!Number.isInteger(importIterations) || importIterations < 1000 || importIterations > MAX_IMPORT_ITERATIONS){
+      alert('这个加密备份文件的参数异常，已拒绝导入。');
+      return;
+    }
     let attempts = 0;
+    let ptBuf = null;
     while(attempts < 5){
       const pass = await showPassPrompt({
         title: '输入备份密码',
@@ -2080,29 +2155,35 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       try{
         const salt = new Uint8Array(b64ToBuf(envelope.salt));
         const iv = new Uint8Array(b64ToBuf(envelope.iv));
-        const key = await deriveKey(pass, salt, envelope.iterations || PBKDF2_ITERATIONS);
-        const ctBuf = b64ToBuf(envelope.ciphertext);
-        const ptBuf = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, ctBuf);
-
-        if(envelope.originalFormat === 'zip'){
-          let zip2;
-          try{ zip2 = await JSZip.loadAsync(ptBuf); }
-          catch(e){ alert('解密成功，但备份内容已损坏，无法解析。'); return; }
-          const manifestEntry = zip2.file('trips.json');
-          if(!manifestEntry){ alert('这个备份里没有找到 trips.json。'); return; }
-          const manifest = JSON.parse(await manifestEntry.async('string'));
-          await processZipImportPayload(zip2, manifest);
-        } else {
-          const text = new TextDecoder().decode(ptBuf);
-          const parsed = JSON.parse(text);
-          await processJSONImportPayload(parsed);
-        }
-        return;
+        const key = await deriveKey(pass, salt, importIterations);
+        ptBuf = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, b64ToBuf(envelope.ciphertext));
+        break;
       }catch(e){
         attempts++;
         if(attempts >= 5){ alert('密码错误次数过多，已取消导入。'); return; }
         alert('密码错误，或文件已损坏，请重新输入。');
       }
+    }
+    if(!ptBuf) return;
+
+    // v28: a failure from here on is NOT a wrong password (it used to be
+    // reported as one) — the file decrypted fine but its content is unusable.
+    try{
+      if(envelope.originalFormat === 'zip'){
+        let zip2;
+        try{ zip2 = await JSZip.loadAsync(ptBuf); }
+        catch(e){ alert('解密成功，但备份内容已损坏，无法解析。'); return; }
+        const manifestEntry = zip2.file('trips.json');
+        if(!manifestEntry){ alert('这个备份里没有找到 trips.json。'); return; }
+        const manifest = JSON.parse(await manifestEntry.async('string'));
+        await processZipImportPayload(zip2, manifest);
+      } else {
+        const parsed = JSON.parse(new TextDecoder().decode(ptBuf));
+        await processJSONImportPayload(parsed);
+      }
+    }catch(e){
+      console.error('[border-ledger] encrypted import failed after decrypt', e);
+      alert('解密成功，但备份内容无法读取或已损坏。');
     }
   }
 
@@ -2188,7 +2269,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       else if(t.dest==='SG') sgDays += d;
       else {
         otherDays += d;
-        const key = t.otherName || '其他';
+        const key = countryDisplayName(t.otherName);
         otherBreakdown[key] = (otherBreakdown[key]||0) + d;
       }
     });
@@ -2272,16 +2353,49 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     `;
   }
 
+  // v28: real calendar dates (2026-13-45 and 2026-02-30 are rejected), end on
+  // or after start, plus limits so a crafted file can't flood storage.
+  const MAX_IMPORT_TRIPS = 5000;
+  const MAX_IMAGES_PER_TRIP = 30;
+  const MAX_IMPORT_FILE_BYTES = 300 * 1024 * 1024;
+  const MAX_ZIP_ENTRIES = 10000;
+  const MAX_ZIP_ENTRY_BYTES = 12 * 1024 * 1024;
+  function isRealISODate(str){
+    if(typeof str !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
+    const y = +str.slice(0,4), m = +str.slice(5,7), d = +str.slice(8,10);
+    if(y < 1900 || y > 2200) return false;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }
   function isValidTrip(t){
-    return t && typeof t === 'object'
+    return !!t && typeof t === 'object'
       && (t.dest === 'MY' || t.dest === 'SG' || t.dest === 'OTHER')
-      && typeof t.start === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.start)
-      && typeof t.end === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.end);
+      && isRealISODate(t.start) && isRealISODate(t.end)
+      && t.end >= t.start;
+  }
+  // free-text fields are coerced to capped strings (a number/object/array in a
+  // crafted file used to crash every later render)
+  function cleanText(v, max){
+    if(typeof v === 'string') return v.slice(0, max);
+    if(typeof v === 'number' && isFinite(v)) return String(v).slice(0, max);
+    return '';
+  }
+
+  // v28: Cancel never deletes anything. Sequence: continue? -> merge? -> (only
+  // then) replace? Returns 'merge' | 'replace' | null (abort).
+  function askImportMode(summary){
+    if(!confirm(summary + '\n\n是否继续导入？（取消 = 放弃导入，不会改动任何现有记录）')) return null;
+    if(trips.length === 0) return 'merge';
+    if(confirm('合并：保留现有 ' + trips.length + ' 条记录，并加入导入的记录。\n\n点击「确定」= 合并；点击「取消」= 看其他选项')) return 'merge';
+    if(confirm('替换：将删除现有 ' + trips.length + ' 条记录及其附件，只保留导入的内容，无法撤销。\n\n点击「确定」= 替换；点击「取消」= 放弃导入')) return 'replace';
+    return null;
   }
 
   // shared body of the plaintext JSON import — also reused by
   // importEncryptedEnvelope() once it has decrypted an encrypted backup
   async function processJSONImportPayload(parsed){
+    if(!parsed || typeof parsed !== 'object'){ alert('文件内容格式不正确。'); return; }
+    if(Array.isArray(parsed.trips) && parsed.trips.length > MAX_IMPORT_TRIPS){ alert('文件中的行程记录过多，已拒绝导入。'); return; }
     const incomingTrips = Array.isArray(parsed.trips) ? parsed.trips.filter(isValidTrip) : [];
     if(incomingTrips.length === 0){
       alert('文件中没有找到有效的行程记录。');
@@ -2290,11 +2404,11 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
 
     const skippedCount = (Array.isArray(parsed.trips) ? parsed.trips.length : 0) - incomingTrips.length;
     const imageCount = incomingTrips.filter(t => typeof t.image === 'string' && isSupportedAttachmentDataURL(t.image)).length;
-    const mode = confirm(
+    const mode = askImportMode(
       `找到 ${incomingTrips.length} 条行程记录${imageCount>0 ? '（含 ' + imageCount + ' 个附件）' : ''}` +
-      `${skippedCount>0 ? '（跳过 ' + skippedCount + ' 条格式不正确的记录）' : ''}。\n\n` +
-      `点击「确定」= 合并到现有记录\n点击「取消」= 用导入内容替换现有全部记录`
+      `${skippedCount>0 ? '（跳过 ' + skippedCount + ' 条格式不正确的记录）' : ''}。`
     );
+    if(!mode) return;
 
     flashStatus('正在导入…');
 
@@ -2303,8 +2417,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     let failedImageCount = 0;
     async function buildTripFromImport(t){
       const newId = 't' + Date.now() + Math.floor(Math.random()*100000) + Math.floor(Math.random()*100000);
-      const sourceImages = Array.isArray(t.images) ? t.images
-        : (typeof t.image === 'string' ? [t.image] : []);
+      const sourceImages = (Array.isArray(t.images) ? t.images
+        : (typeof t.image === 'string' ? [t.image] : [])).slice(0, MAX_IMAGES_PER_TRIP);
       const imageIds = [];
       for(const dataURL of sourceImages){
         if(!isSupportedAttachmentDataURL(dataURL)) continue;
@@ -2315,12 +2429,12 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       return {
         id: newId,
         dest: t.dest,
-        otherName: t.dest === 'OTHER' ? (t.otherName || '') : '',
+        otherName: t.dest === 'OTHER' ? cleanText(t.otherName, 100) : '',
         start: t.start,
         end: t.end,
-        note: t.note || '',
+        note: cleanText(t.note, 2000),
         transportMode: ['AIR','LAND','SEA','OTHER'].includes(t.transportMode) ? t.transportMode : 'AIR',
-        route: t.route || '',
+        route: cleanText(t.route, 500),
         imageIds
       };
     }
@@ -2330,14 +2444,13 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       builtTrips.push(await buildTripFromImport(t));
     }
 
-    if(mode){
-      // merge with existing records
+    // replace: v28 saves the new data FIRST and only then deletes the old
+    // records' images (and puts everything back if the save fails)
+    let replacedTrips = null;
+    if(mode === 'merge'){
       trips = trips.concat(builtTrips);
     } else {
-      // replace — first drop images belonging to the records being discarded
-      for(const old of trips){
-        await deleteAllTripImages(old);
-      }
+      replacedTrips = trips;
       trips = builtTrips;
     }
 
@@ -2349,12 +2462,29 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       }
     }
 
-    await saveTrips();
+    const savedOk = await finishReplaceAfterSave(replacedTrips, builtTrips);
     render();
+    if(!savedOk) return;
     flashStatus(failedImageCount > 0 ? `导入完成（${failedImageCount} 张图片未能保存）` : '导入完成');
   }
 
+  // saves `trips`; for a replace import, deletes the old images only after the
+  // save succeeded, otherwise restores the old list and discards the new images
+  async function finishReplaceAfterSave(replacedTrips, builtTrips){
+    const ok = await saveTrips();
+    if(!replacedTrips) return ok;
+    if(ok){
+      for(const old of replacedTrips){ await deleteAllTripImages(old); }
+      return true;
+    }
+    trips = replacedTrips;
+    for(const nt of builtTrips){ try{ await deleteAllTripImages(nt); }catch(e){} }
+    alert('保存失败，导入已取消，原有记录保持不变。');
+    return false;
+  }
+
   function importJSON(file){
+    if(file.size > MAX_IMPORT_FILE_BYTES){ alert('文件太大，已拒绝导入。'); return; }
     const reader = new FileReader();
     reader.onload = async ()=>{
       let parsed;
@@ -2377,6 +2507,9 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // shared body of the ZIP import — also reused by importEncryptedEnvelope()
   // once it has decrypted an encrypted ZIP backup into an in-memory JSZip
   async function processZipImportPayload(zip, manifest){
+    if(!manifest || typeof manifest !== 'object'){ alert('trips.json 内容格式不正确。'); return; }
+    if(Object.keys(zip.files).length > MAX_ZIP_ENTRIES){ alert('ZIP 中的文件过多，已拒绝导入。'); return; }
+    if(Array.isArray(manifest.trips) && manifest.trips.length > MAX_IMPORT_TRIPS){ alert('文件中的行程记录过多，已拒绝导入。'); return; }
     const incomingTrips = Array.isArray(manifest.trips) ? manifest.trips.filter(isValidTrip) : [];
     if(incomingTrips.length === 0){
       alert('文件中没有找到有效的行程记录。');
@@ -2385,11 +2518,11 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
 
     const skippedCount = (Array.isArray(manifest.trips) ? manifest.trips.length : 0) - incomingTrips.length;
     const totalImages = incomingTrips.reduce((sum, t) => sum + (Array.isArray(t.images) ? t.images.length : 0), 0);
-    const mode = confirm(
+    const mode = askImportMode(
       `找到 ${incomingTrips.length} 条行程记录${totalImages>0 ? '（含 ' + totalImages + ' 张图片）' : ''}` +
-      `${skippedCount>0 ? '（跳过 ' + skippedCount + ' 条格式不正确的记录）' : ''}。\n\n` +
-      `点击「确定」= 合并到现有记录\n点击「取消」= 用导入内容替换现有全部记录`
+      `${skippedCount>0 ? '（跳过 ' + skippedCount + ' 条格式不正确的记录）' : ''}。`
     );
+    if(!mode) return;
 
     flashStatus('正在导入…');
     let failedImageCount = 0;
@@ -2398,13 +2531,19 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       const newId = 't' + Date.now() + Math.floor(Math.random()*100000) + Math.floor(Math.random()*100000);
       const imageIds = [];
       if(Array.isArray(t.images)){
-        for(const filename of t.images){
+        for(const filename of t.images.slice(0, MAX_IMAGES_PER_TRIP)){
+          if(typeof filename !== 'string'){ failedImageCount++; continue; }
           const entry = zip.file('images/' + filename) || zip.file(filename);
           if(!entry){ failedImageCount++; continue; }
           try{
+            const declared = entry._data && entry._data.uncompressedSize;
+            if(typeof declared === 'number' && declared > MAX_ZIP_ENTRY_BYTES){ failedImageCount++; continue; }
             const base64Data = await entry.async('base64');
-            const mimePrefix = /\.pdf$/i.test(filename) ? 'data:application/pdf;base64,' : 'data:image/jpeg;base64,';
-            const dataURL = mimePrefix + base64Data;
+            // the file's real type comes from its first bytes, not its name
+            const sniffedMime = sniffAttachmentMime(base64Data.slice(0, 16));
+            if(!sniffedMime){ failedImageCount++; continue; }
+            const dataURL = 'data:' + sniffedMime + ';base64,' + base64Data;
+            if(!isSupportedAttachmentDataURL(dataURL)){ failedImageCount++; continue; }
             const imgId = newImageId();
             const ok = await setTripImage(newId, imgId, dataURL);
             if(ok) imageIds.push(imgId); else failedImageCount++;
@@ -2414,12 +2553,12 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       return {
         id: newId,
         dest: t.dest,
-        otherName: t.dest === 'OTHER' ? (t.otherName || '') : '',
+        otherName: t.dest === 'OTHER' ? cleanText(t.otherName, 100) : '',
         start: t.start,
         end: t.end,
-        note: t.note || '',
+        note: cleanText(t.note, 2000),
         transportMode: ['AIR','LAND','SEA','OTHER'].includes(t.transportMode) ? t.transportMode : 'AIR',
-        route: t.route || '',
+        route: cleanText(t.route, 500),
         imageIds
       };
     }
@@ -2429,12 +2568,11 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       builtTrips.push(await buildTripFromZipImport(t));
     }
 
-    if(mode){
+    let replacedTrips = null;
+    if(mode === 'merge'){
       trips = trips.concat(builtTrips);
     } else {
-      for(const old of trips){
-        await deleteAllTripImages(old);
-      }
+      replacedTrips = trips;
       trips = builtTrips;
     }
 
@@ -2446,12 +2584,14 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       }
     }
 
-    await saveTrips();
+    const savedOk = await finishReplaceAfterSave(replacedTrips, builtTrips);
     render();
+    if(!savedOk) return;
     flashStatus(failedImageCount > 0 ? `导入完成（${failedImageCount} 张图片未能保存）` : '导入完成');
   }
 
   async function importZIP(file){
+    if(file.size > MAX_IMPORT_FILE_BYTES){ alert('文件太大，已拒绝导入。'); return; }
     if(typeof JSZip === 'undefined'){
       alert('ZIP 组件加载失败（可能是网络问题），请刷新页面重试。');
       return;
@@ -2482,6 +2622,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     }
     let manifest;
     try{
+      const mdeclared = manifestEntry._data && manifestEntry._data.uncompressedSize;
+      if(typeof mdeclared === 'number' && mdeclared > 50 * 1024 * 1024){ alert('trips.json 过大，已拒绝导入。'); return; }
       manifest = JSON.parse(await manifestEntry.async('string'));
     }catch(e){
       alert('trips.json 内容有问题，无法解析。');
@@ -2508,6 +2650,12 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     const file = e.target.files[0];
     if(file) importZIP(file);
     e.target.value = '';
+  });
+  // v28: the printed report is a full plaintext copy of the year — remove it
+  // from the page as soon as the print dialog is done
+  window.addEventListener('afterprint', ()=>{
+    const pa = document.getElementById('printArea');
+    if(pa) pa.innerHTML = '';
   });
   document.getElementById('printBtn').addEventListener('click', ()=>{
     const year = document.getElementById('printYearSelect').value;
@@ -2657,7 +2805,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       function onSubmit(){
         const v1 = lockPass1El.value;
         const v2 = lockPass2El.value;
-        const minLen = opts.minLength || 4;
+        const minLen = opts.minLength || MIN_PASSCODE_LEN;
         if(!v1 || v1.length < minLen){ lockErrorEl.textContent = `密码至少需要 ${minLen} 位`; return; }
         if(opts.confirmField && v1 !== v2){ lockErrorEl.textContent = '两次输入的密码不一致'; return; }
         cleanup();
@@ -2684,7 +2832,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       const pass = await showPassPrompt({
         title: '🔒 设置访问密码',
         subtitle: '首次使用需要设置一个密码，用于加密保护这台设备上保存的所有数据（行程记录、图片、设置）。请牢记此密码——如果忘记，加密数据将无法恢复。',
-        confirmField: true, cancelable: false, submitLabel: '设置密码', minLength: 4
+        confirmField: true, cancelable: false, submitLabel: '设置密码', minLength: MIN_PASSCODE_LEN
       });
       if(pass){
         flashStatusSafe('正在加密初始化…');
@@ -2784,7 +2932,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     if(oldPass === null) return;
     const newPass = await showPassPrompt({
       title: '设置新密码', subtitle: '请输入新密码并确认。',
-      confirmField: true, cancelable: true, submitLabel: '确认更改', minLength: 4
+      confirmField: true, cancelable: true, submitLabel: '确认更改', minLength: MIN_PASSCODE_LEN
     });
     if(newPass === null) return;
     flashStatus('正在更新加密…');
@@ -2793,7 +2941,9 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       flashStatus('密码已更新（指纹/Face ID 解锁已重置，如需请重新启用）');
       await refreshBioButtonLabel();
     }catch(e){
-      alert('当前密码不正确，未更改密码。');
+      alert(e && e.message === 'change-failed'
+        ? '更改密码失败，原密码和数据保持不变，请重试。'
+        : '当前密码不正确，未更改密码。');
     }
   });
 
@@ -2801,18 +2951,85 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // the unlock flow). Exposed as its own named function — rather than an
   // inline listener — so both the top-bar lock button and any other future
   // entry point can trigger the exact same behavior.
+  // v28: also drops every decrypted thing the page still holds (the in-memory
+  // trip list, the rendered tables/cards, the print report, the attachment
+  // viewer and the add/edit form's pending images) — before this, only the
+  // key was dropped and the data stayed in memory and in the DOM behind the
+  // lock overlay.
+  function scrubDecryptedState(){
+    trips = [];
+    if(imgModalOverlay.classList.contains('open')) closeImageModal(false);
+    imgModalImg.src = '';
+    imgModalPdfWrap.innerHTML = '';
+    modalImages = [];
+    resetImageFormState();
+    tripTableWrap.innerHTML = '';
+    yearCardsEl.innerHTML = '';
+    if(overviewYearSelectEl) overviewYearSelectEl.innerHTML = '';
+    const pa = document.getElementById('printArea');
+    if(pa) pa.innerHTML = '';
+  }
+
+  let lockInProgress = false;
   async function lockAppNow(){
-    closeTripModal(false); // discard any half-filled trip form
-    hideToast();
-    sessionKey = null;
-    closeSidebar();
-    lockOverlayEl.classList.add('open');
-    await runUnlockFlow();
-    lockOverlayEl.classList.remove('open');
-    await loadAll();
+    if(lockInProgress) return;
+    lockInProgress = true;
+    try{
+      clearTimeout(idleTimer);
+      closeTripModal(false); // discard any half-filled trip form
+      hideToast();
+      sessionKey = null;
+      scrubDecryptedState();
+      closeSidebar();
+      lockOverlayEl.classList.add('open');
+      await runUnlockFlow();
+      lockOverlayEl.classList.remove('open');
+      await loadAll();
+      resetIdleTimer();
+      maybeShowWeakPasscodeNotice();
+    } finally {
+      lockInProgress = false;
+    }
   }
   const topLockBtnEl = document.getElementById('topLockBtn');
   if(topLockBtnEl) topLockBtnEl.addEventListener('click', lockAppNow);
+
+  // ---- v28: auto-lock -------------------------------------------------
+  // Locks after IDLE_LOCK_MS without any touch/key/scroll, and when the app
+  // comes back to the foreground after being hidden for BACKGROUND_LOCK_MS
+  // (kept a few minutes so a trip to the camera or file picker while filling
+  // the form doesn't throw the form away).
+  const IDLE_LOCK_MS = 5 * 60 * 1000;
+  const BACKGROUND_LOCK_MS = 3 * 60 * 1000;
+  let idleTimer = null;
+  let hiddenAt = 0;
+  function autoLockApplicable(){
+    return !!sessionKey && !lockInProgress && !lockOverlayEl.classList.contains('open');
+  }
+  function resetIdleTimer(){
+    clearTimeout(idleTimer);
+    if(!sessionKey) return;
+    idleTimer = setTimeout(()=>{ if(autoLockApplicable()) lockAppNow(); }, IDLE_LOCK_MS);
+  }
+  ['pointerdown','keydown','touchstart','scroll','wheel'].forEach(ev=>{
+    window.addEventListener(ev, ()=>{ if(sessionKey) resetIdleTimer(); }, { passive:true, capture:true });
+  });
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'hidden'){
+      hiddenAt = Date.now();
+    } else {
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = 0;
+      if(away >= BACKGROUND_LOCK_MS && autoLockApplicable()) lockAppNow();
+      else resetIdleTimer();
+    }
+  });
+
+  function maybeShowWeakPasscodeNotice(){
+    if(!weakPasscodeAtUnlock) return;
+    weakPasscodeAtUnlock = false;
+    showToast('当前密码少于 ' + MIN_PASSCODE_LEN + ' 位，建议在设置里更改密码。', { duration: 6000 });
+  }
 
   // ================= SIDEBAR NAVIGATION DRAWER =================
   // Mobile: slide-in drawer opened via the hamburger button, closed via its
@@ -3037,6 +3254,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     }
     lockOverlayEl.classList.remove('open');
     await loadAll();
+    resetIdleTimer();
+    maybeShowWeakPasscodeNotice();
     await refreshBioButtonLabel();
   })();
 })();

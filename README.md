@@ -256,7 +256,47 @@ shown only while 导出加密 is off. `#saveStatus` is hidden while empty.
   form field. Inline transform/opacity are cleared in `settle()` so the CSS
   transition finishes the motion.
 
+## v28: security and robustness pass (full review of v27)
+
+Decisions: minimum passcode length is **6**; **no unlock throttling** (skipped on purpose).
+
+- **Passcode policy:** new passcodes (setup, 更改密码, backup password) need
+  `MIN_PASSCODE_LEN` = 6 characters. Unlocking is unchanged, so an existing
+  4–5 character passcode still works; a toast after unlock suggests changing it.
+- **PBKDF2 210,000 → 600,000 iterations.** Existing vaults are migrated
+  automatically the next time the correct passcode is entered (new salt, every
+  record re-encrypted). All plaintexts are read first; if any write fails,
+  everything is restored under the old key and the old lock-meta stays, so
+  nothing becomes unreadable. Change Passcode uses the same rollback. Biometric
+  unlock is unaffected (the passcode itself does not change). Old encrypted
+  backups still import (their own iteration count is used; counts outside
+  1,000–5,000,000 are refused).
+- **Auto-lock:** after 5 minutes without touch/key/scroll (`IDLE_LOCK_MS`), and
+  when the app returns to the foreground after 3+ minutes hidden
+  (`BACKGROUND_LOCK_MS`). Locking now also clears the in-memory trip list, the
+  rendered tables/cards, the print report and the attachment viewer; the print
+  report is also cleared on `afterprint`.
+- **Import hardening:** real calendar dates, `end >= start`, free-text fields
+  coerced to capped strings, limits (5,000 trips, 30 attachments per trip,
+  300 MB file, 10,000 ZIP entries, 12 MB per ZIP entry), attachments must start
+  with real JPEG/PNG/WebP/GIF/%PDF bytes (ZIP entries are typed by content, not
+  file name).
+- **Import dialog:** continue? → merge? → replace? Cancel never deletes anything.
+  Replace saves the new records first and deletes the old attachments only
+  after the save succeeded (otherwise the old list is restored). A problem after
+  decrypting an encrypted backup is no longer reported as "wrong password".
+- **Logic/tidy:** other-country names are grouped the same way in the print
+  report as on the cards; dead variable removed; saving a trip that strictly
+  overlaps another shows a warning (a same-day return + departure is not an
+  overlap).
+- **Service worker:** the offline fallback can't be `undefined`; only exact
+  app-shell URLs are cached (no query-string variants, no redirected responses);
+  other origins are not intercepted. **`_headers`:** added
+  `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` (`same-origin`).
+  pdf.js is opened with `isEvalSupported: false`.
+- **Not changed:** CSP (meta and `_headers` stay in sync, no edit needed).
+
 ## Current versions
 
-- `APP_VERSION`: `v27` (`app.js`)
-- `CACHE_NAME`: `border-day-ledger-cache-v27` (`sw.js`)
+- `APP_VERSION`: `v28` (`app.js`)
+- `CACHE_NAME`: `border-day-ledger-cache-v28` (`sw.js`)
