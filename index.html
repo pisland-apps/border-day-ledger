@@ -485,9 +485,12 @@
   /* print area — hidden on screen, only rendered when printing */
   #printArea{display:none;}
   @media print{
-    body > header, body > main, body > .footer-note{display:none !important;}
+    /* v31: hide EVERYTHING except the report. The old rule listed body > header /
+       main / .footer-note, which stopped matching when the layout was wrapped in
+       .app-body-layout (v21), so the top bar, sidebar and whole page printed too. */
+    body > *:not(#printArea){display:none !important;}
     #printArea{display:block !important;}
-    body{background:#fff; padding:0;}
+    html, body{background:#fff; padding:0; margin:0; height:auto;}
   }
   .print-title{font-family:var(--serif); font-size:24px; margin:0 0 2px;}
   .print-sub{font-family:var(--mono); font-size:11px; color:var(--grey-text); margin-bottom:18px;}

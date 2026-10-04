@@ -256,6 +256,10 @@ shown only while 导出加密 is off. `#saveStatus` is hidden while empty.
   form field. Inline transform/opacity are cleared in `settle()` so the CSS
   transition finishes the motion.
 
+## v31: print shows only the report again
+
+Printing (🖨️ 打印) had been printing the whole app — top bar, sidebar, year card and trip list — followed by the report, instead of the report alone. Cause: since the v21 layout change the page content sits inside `.app-body-layout` / `.app-main-col`, but the print stylesheet still only hid `body > header`, `body > main` and `body > .footer-note`, which no longer matched. Fix (`index.html`, `@media print`): hide every direct child of `<body>` except `#printArea`, so a future layout wrapper can't bring it back. Checked in headless Chromium with print emulation: before, the top bar, overlay, layout and version badge were visible and the PDF was 2 pages; after, only `#printArea` is visible and it is 1 page. Report content is the v29 one (counted through today for the current year, plus a full-year estimate line).
+
 ## v30: sidebar swipe fixed
 
 v29's edge guard was the only change to the swipe code since v27 and it made the swipe hard to trigger (about 1 in 10 on the real phone), because a pull-out swipe naturally starts at the screen edge. Removed; the swipe code is back to the v27 behaviour. If the system back gesture takes a touch, the page does not receive it (or receives a touchcancel, which already settles the drawer). If the swipe is still hard, the next thing to relax is the 1.6:1 horizontal-vs-vertical test in `touchmove`.
@@ -311,5 +315,5 @@ Decisions: minimum passcode length is **6**; **no unlock throttling** (skipped o
 
 ## Current versions
 
-- `APP_VERSION`: `v30` (`app.js`)
-- `CACHE_NAME`: `border-day-ledger-cache-v30` (`sw.js`)
+- `APP_VERSION`: `v31` (`app.js`)
+- `CACHE_NAME`: `border-day-ledger-cache-v31` (`sw.js`)

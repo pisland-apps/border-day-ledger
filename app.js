@@ -42,7 +42,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v30';
+  const APP_VERSION = 'v31';
   const APP_VERSION_DATE = '2026-10-04';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
