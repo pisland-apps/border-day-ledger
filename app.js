@@ -5,7 +5,7 @@
 // See README.md for why this change was made (a CSP hash mismatch after
 // deploying to GitHub Pages silently broke every button on the page).
 //
-// pdf.js (pdfjs-dist 6.2.108) is ESM-only as of v4+ — there is no more
+// pdf.js (pdfjs-dist 6.4.299) is ESM-only as of v4+ — there is no more
 // global-script build, so this file itself must be loaded as
 // <script type="module" src="app.js"> (see index.html) and pdf.js is
 // imported directly instead of read off window.pdfjsLib. The import must
@@ -15,7 +15,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
 
 (function(){
   // pdf.js worker — vendored locally at ./lib/pdf.worker.min.mjs (same
-  // pdfjs-dist 6.2.108 package as ./lib/pdf.min.mjs imported above). Used
+  // pdfjs-dist 6.4.299 package as ./lib/pdf.min.mjs imported above). Used
   // by the attachment viewer to render PDF pages onto <canvas> instead of
   // relying on the browser's own PDF handling, which can silently trigger
   // a download or render blank depending on the browser's PDF setting.
@@ -42,7 +42,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v31';
+  const APP_VERSION = 'v32';
   const APP_VERSION_DATE = '2026-10-04';
 
   // Set immediately (not gated behind unlock) so the badge is visible on

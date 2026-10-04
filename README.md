@@ -36,7 +36,7 @@ migration was needed.
 
 PDFs are rendered inside the existing attachment viewer modal via
 [pdf.js](https://mozilla.github.io/pdf.js/), vendored locally at
-`lib/pdf.min.mjs` + `lib/pdf.worker.min.mjs` (pdfjs-dist 6.2.108) rather
+`lib/pdf.min.mjs` + `lib/pdf.worker.min.mjs` (pdfjs-dist 6.4.299) rather
 than pulled from a CDN — same pattern as the sibling `tax-tracker` app.
 JSZip (used for the encrypted ZIP backup/import feature) is vendored the
 same way at `lib/jszip.min.js` (v3.10.1) — it used to be loaded from
@@ -256,6 +256,10 @@ shown only while 导出加密 is off. `#saveStatus` is hidden while empty.
   form field. Inline transform/opacity are cleared in `settle()` so the CSS
   transition finishes the motion.
 
+## v32: pdf.js updated 6.2.108 → 6.4.299
+
+Vendored `lib/pdf.min.mjs` + `lib/pdf.worker.min.mjs` replaced with the pdfjs-dist 6.4.299 `build/` files (the latest on npm at the time). File names, the ESM-only layout and the API calls the app uses (`GlobalWorkerOptions.workerSrc`, `getDocument({ data, isEvalSupported: false })`, `getPage` / `getViewport` / `render`) are unchanged, so it was a plain file swap with no code changes besides the version comments. `APP_VERSION` and `CACHE_NAME` bumped to v32 so returning visitors pick up the new files. The CSP in `_headers` is unchanged (`script-src 'self'`, `worker-src 'self'`).
+
 ## v31: print shows only the report again
 
 Printing (🖨️ 打印) had been printing the whole app — top bar, sidebar, year card and trip list — followed by the report, instead of the report alone. Cause: since the v21 layout change the page content sits inside `.app-body-layout` / `.app-main-col`, but the print stylesheet still only hid `body > header`, `body > main` and `body > .footer-note`, which no longer matched. Fix (`index.html`, `@media print`): hide every direct child of `<body>` except `#printArea`, so a future layout wrapper can't bring it back. Checked in headless Chromium with print emulation: before, the top bar, overlay, layout and version badge were visible and the PDF was 2 pages; after, only `#printArea` is visible and it is 1 page. Report content is the v29 one (counted through today for the current year, plus a full-year estimate line).
@@ -315,5 +319,5 @@ Decisions: minimum passcode length is **6**; **no unlock throttling** (skipped o
 
 ## Current versions
 
-- `APP_VERSION`: `v31` (`app.js`)
-- `CACHE_NAME`: `border-day-ledger-cache-v31` (`sw.js`)
+- `APP_VERSION`: `v32` (`app.js`)
+- `CACHE_NAME`: `border-day-ledger-cache-v32` (`sw.js`)
