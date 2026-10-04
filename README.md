@@ -256,6 +256,14 @@ shown only while 导出加密 is off. `#saveStatus` is hidden while empty.
   form field. Inline transform/opacity are cleared in `settle()` so the CSS
   transition finishes the motion.
 
+## v34: scanner PDFs still blank after v33 — JS fallback decoders added
+
+Symptom: after v33 the scanner PDFs could still open blank on a host that sends the CSP as an HTTP header (as `_headers` does). Cause: a CSP delivered as a header also applies to pdf.js's worker (a `<meta>` CSP does not), and the worker may not compile `.wasm` unless `script-src` has `'wasm-unsafe-eval'`; the v33 `<meta>` keyword alone does not cover that. pdf.js then looks for a plain-JavaScript copy of the decoder in the same folder, which v33 had not shipped. Found while fixing the same problem in the companion Shelfmark app (reproduced in headless Chromium with the CSP as a header: strict CSP + `.wasm` only → blank pages; + the fallback files → all pages show).
+
+Fix: `lib/wasm/jbig2_nowasm_fallback.js` and `openjpeg_nowasm_fallback.js` added (pdfjs-dist 6.4.299) and listed in `sw.js` `APP_SHELL`; the v33 CSP change is **reverted** (`script-src 'self'` only, in both `index.html` and `_headers`). `APP_VERSION` / `CACHE_NAME` → v34. Optional: put `'wasm-unsafe-eval'` back in both places to let pdf.js use the faster `.wasm` decoders; scans work either way.
+
+When updating pdf.js later, copy the whole `wasm/` folder (including the `*_nowasm_fallback.js` files) from the same pdfjs-dist version.
+
 ## v33: scanner PDFs showed blank pages — pdf.js wasm files added
 
 Symptom: PDFs saved by a flatbed scanner (EPSON Scan, 1-bit CCITT G4 images) opened in the attachment viewer as blank white pages, while ordinary PDFs (e.g. a phone bill) rendered fine. Not caused by the v32 pdf.js bump — 6.2.108 behaves the same. Cause: since pdf.js 5 the CCITT / JBIG2 / JPEG2000 image decoders (and the ICC colour module) are WebAssembly files that must be supplied through the `wasmUrl` option of `getDocument()`. The app never passed it, so pdf.js logged "JBig2 failed to initialize" / "Ensure that the `wasmUrl` API parameter is provided" and drew nothing for those images.
@@ -327,5 +335,5 @@ Decisions: minimum passcode length is **6**; **no unlock throttling** (skipped o
 
 ## Current versions
 
-- `APP_VERSION`: `v33` (`app.js`)
-- `CACHE_NAME`: `border-day-ledger-cache-v33` (`sw.js`)
+- `APP_VERSION`: `v34` (`app.js`)
+- `CACHE_NAME`: `border-day-ledger-cache-v34` (`sw.js`)
