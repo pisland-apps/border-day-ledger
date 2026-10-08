@@ -42,8 +42,8 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   // (Ctrl/Cmd+Shift+R) or clear the Service Worker/cache in devtools,
   // rather than assuming the deploy didn't work.
   // ---------------------------------------------------------------------
-  const APP_VERSION = 'v34';
-  const APP_VERSION_DATE = '2026-10-05';
+  const APP_VERSION = 'v35';
+  const APP_VERSION_DATE = '2026-10-08';
 
   // Set immediately (not gated behind unlock) so the badge is visible on
   // the lock screen before the password is entered.
@@ -308,7 +308,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
 
   // Checks a passcode against the stored lock-meta check value without
   // side effects (does not set sessionKey). Used by tryUnlock, changePasscode,
-  // and biometric enrollment (to confirm identity before wrapping the passcode).
+  // and the Change Passcode flow.
   async function verifyPasscodeAgainstMeta(passcode, meta){
     try{
       const salt = new Uint8Array(b64ToBuf(meta.salt));
@@ -375,224 +375,17 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       throw new Error('change-failed');
     }
     sessionKey = newKey;
-    // the old passcode is no longer valid — any biometric-wrapped copy of it
-    // is now stale, so drop it rather than leave a silent way in with a dead passcode
-    await disableBiometricUnlock();
   }
 
   // ---------------------------------------------------------------------
-  // Optional biometric unlock (Face ID / Touch ID / Android fingerprint).
-  // Dual-mode, decided once per enrollment:
-  //
-  //   PRF mode only: the wrapping key is derived directly from the WebAuthn
-  //   PRF extension output, so the AES-GCM key that unwraps the passcode
-  //   cannot exist without redoing the biometric ceremony — the biometric
-  //   check is cryptographically load-bearing, not just a UI gate.
-  //
-  // As of v18 this file no longer has a "gate" fallback mode. An earlier
-  // version fell back to a mode where the fingerprint/Face prompt was only
-  // a UX gate in front of a separately generated, non-extractable AES-GCM
-  // key stored as a plain CryptoKey object in IndexedDB. That key could be
-  // read and used directly via idbGet()+crypto.subtle.decrypt() by anyone
-  // with script execution in the page (devtools, or a future XSS bug)
-  // WITHOUT ever calling navigator.credentials.get() — i.e. the biometric
-  // check could be bypassed entirely, it wasn't actually protecting
-  // anything. That mode has been removed: enableBiometricUnlock() now only
-  // succeeds when the platform actually returns usable PRF output, and
-  // tryBiometricUnlock() no longer has a code path that trusts an
-  // unauthenticated wrapping key. See README.md for details. Existing
-  // installs that had enrolled the old 'gate' mode will have that stale,
-  // insecure record removed automatically and fall back to the passcode.
-  //
-  // PRF support is inconsistent across Android/Chrome versions/OEMs — on
-  // some real devices `navigator.credentials.create()` with a `prf`
-  // extension request fails outright, and on others `create()` succeeds but
-  // never actually returns usable PRF output. On those devices biometric
-  // unlock simply isn't offered; the passcode remains the only unlock
-  // mechanism, which is always required to exist regardless.
-  //
-  // Because the PRF-derived key can only be reconstructed via a fresh
-  // WebAuthn ceremony (not stored as a CryptoKey object), this feature only
-  // works on the 'idb' local backend (raw IndexedDB) — not the Claude.ai
-  // window.storage bridge or the localStorage fallback, both of which only
-  // accept strings. In practice that's not a real limitation: WebAuthn
-  // platform authenticators only work over https/localhost on a real
-  // device anyway, which is exactly the standalone-deploy 'idb' scenario.
+  // Biometric unlock was removed in v35 (it needed WebAuthn PRF, which the
+  // owner's Samsung/Xiaomi devices do not provide). This only deletes the
+  // wrapped-passcode record an earlier build may have left in IndexedDB.
   // ---------------------------------------------------------------------
-  const BIO_META_KEY = 'border-ledger:biometric-unlock';
-
-  function biometricSupported(){
-    return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
-  }
-  async function biometricPlatformAvailable(){
-    if(!biometricSupported()) return false;
-    if(!idbDB) return false; // needs raw IndexedDB to store the CryptoKey object — see note above
-    try{ return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); }
-    catch(e){ return false; }
-  }
-
-  async function deriveAesKeyFromPrfBytes(bytes){
-    return crypto.subtle.importKey('raw', bytes, { name:'AES-GCM' }, false, ['encrypt','decrypt']);
-  }
-
-  function biometricCreateOptions(withPrf, salt){
-    const opts = {
-      challenge: randomBytes(32),
-      rp: { name: '关口记录簿' },
-      user: { id: randomBytes(16), name: 'border-ledger-local', displayName: '关口记录簿本机解锁' },
-      pubKeyCredParams: [{ type:'public-key', alg:-7 }, { type:'public-key', alg:-257 }],
-      authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required' },
-      timeout: 60000,
-      attestation: 'none'
-    };
-    if(withPrf) opts.extensions = { prf: { eval: { first: salt } } };
-    return opts;
-  }
-
-  async function enableBiometricUnlock(currentPasscode){
-    if(!(await biometricPlatformAvailable())){
-      alert('这台设备/浏览器不支持指纹或 Face ID 解锁。');
-      return false;
-    }
-
-    const salt = randomBytes(32);
-    let cred = null;
-    let prfRequested = true;
-
-    // Attempt 1: register with the PRF extension requested — the stronger
-    // binding, key is derived straight from the biometric result.
-    try{
-      cred = await navigator.credentials.create({ publicKey: biometricCreateOptions(true, salt) });
-    }catch(e){
-      console.warn('[border-ledger] biometric registration with PRF failed, retrying without PRF', e);
-      prfRequested = false;
-    }
-
-    // Attempt 2 (fallback): some devices reject credentials.create() outright
-    // the instant a `prf` extension is requested. If that happened, retry
-    // the exact same registration without asking for PRF at all.
-    if(!cred){
-      try{
-        cred = await navigator.credentials.create({ publicKey: biometricCreateOptions(false, salt) });
-      }catch(e2){
-        console.error('[border-ledger] biometric registration failed', e2);
-        alert('设置指纹/Face ID 解锁失败（可能被取消或设备不支持），请重试。');
-        return false;
-      }
-    }
-
-    // Figure out whether we actually got usable PRF output. It can come
-    // back immediately on create(), or only on a follow-up get() on some
-    // platforms — and on others it never comes back at all.
-    let prfBytes = null;
-    if(prfRequested){
-      const ext = cred.getClientExtensionResults();
-      if(ext && ext.prf && ext.prf.results && ext.prf.results.first){
-        prfBytes = ext.prf.results.first;
-      } else {
-        try{
-          const assertion = await navigator.credentials.get({
-            publicKey: {
-              challenge: randomBytes(32),
-              allowCredentials: [{ id: cred.rawId, type:'public-key' }],
-              userVerification: 'required',
-              extensions: { prf: { eval: { first: salt } } }
-            }
-          });
-          const aext = assertion.getClientExtensionResults();
-          prfBytes = aext && aext.prf && aext.prf.results && aext.prf.results.first;
-        }catch(e3){ /* leave prfBytes null — enrollment will fail cleanly below */ }
-      }
-    }
-
-    // No usable PRF output: unlike earlier versions, we no longer fall
-    // back to an unauthenticated "gate" mode (that mode's biometric check
-    // could be bypassed entirely by anyone with script execution in the
-    // page — see the comment block above). Fail enrollment cleanly instead
-    // of silently storing something weaker than what the UI implies.
-    if(!prfBytes){
-      console.error('[border-ledger] biometric registration succeeded but no usable PRF output was returned; not enrolling');
-      alert('这台设备/浏览器的指纹/Face ID 不支持所需的安全能力（PRF），无法启用指纹/Face ID 解锁。请继续使用密码解锁。');
-      return false;
-    }
-
-    const iv = randomBytes(12);
-    const bioKey = await deriveAesKeyFromPrfBytes(prfBytes);
-    const ctBuf = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, bioKey, new TextEncoder().encode(currentPasscode));
-    await idbSet(BIO_META_KEY, {
-      v: 3,
-      method: 'prf',
-      credentialId: bufToB64(cred.rawId),
-      salt: bufToB64(salt),
-      iv: bufToB64(iv),
-      ct: bufToB64(ctBuf)
-    });
-    return true;
-  }
-
-  async function disableBiometricUnlock(){
+  const LEGACY_BIO_META_KEY = 'border-ledger:biometric-unlock';
+  async function purgeLegacyBiometricRecord(){
     if(!idbDB) return;
-    await idbDelete(BIO_META_KEY).catch(()=>{});
-  }
-
-  // returns true on success (also sets sessionKey via tryUnlock); false on
-  // any failure/cancellation — caller should fall back to the passcode field
-  async function tryBiometricUnlock(){
-    if(!idbDB) return false;
-    const rec = await idbGet(BIO_META_KEY).catch(()=>null);
-    if(!rec) return false;
-    // v1/v2 records predate the method field — infer from shape so existing
-    // PRF enrollments (created by earlier app versions) keep working.
-    const method = rec.method || (rec.wrappingKey ? 'gate' : (rec.salt ? 'prf' : null));
-
-    // 'gate' mode has been removed (see the comment block above this
-    // function) — its wrapping key was stored in IndexedDB in a way that
-    // let anyone with script execution in the page decrypt the passcode
-    // without ever completing a WebAuthn ceremony, i.e. the biometric check
-    // didn't actually gate anything. Rather than honor a stale record that
-    // provides false reassurance, remove it and fall back to the passcode
-    // field; the user can re-enroll, which will only succeed if this
-    // device actually supports PRF.
-    if(method === 'gate'){
-      console.warn('[border-ledger] removing legacy insecure biometric "gate" enrollment; re-enroll to use biometric unlock (requires PRF support)');
-      await idbDelete(BIO_META_KEY).catch(()=>{});
-      return false;
-    }
-
-    if(!method) return false;
-
-    if(method === 'prf'){
-      let assertion;
-      try{
-        assertion = await navigator.credentials.get({
-          publicKey: {
-            challenge: randomBytes(32),
-            allowCredentials: [{ id: b64ToBuf(rec.credentialId), type:'public-key' }],
-            userVerification: 'required',
-            timeout: 60000,
-            extensions: { prf: { eval: { first: new Uint8Array(b64ToBuf(rec.salt)) } } }
-          }
-        });
-      }catch(e){ return false; }
-
-      const ext = assertion.getClientExtensionResults();
-      const prfBytes = ext && ext.prf && ext.prf.results && ext.prf.results.first;
-      if(!prfBytes) return false;
-
-      try{
-        const bioKey = await deriveAesKeyFromPrfBytes(prfBytes);
-        const iv = new Uint8Array(b64ToBuf(rec.iv));
-        const ptBuf = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, bioKey, b64ToBuf(rec.ct));
-        const passcode = new TextDecoder().decode(ptBuf);
-        return await tryUnlock(passcode);
-      }catch(e){
-        console.error('[border-ledger] biometric (prf) unwrap failed', e);
-        return false;
-      }
-    }
-
-    // No other method is supported (see comment block above).
-    return false;
+    await idbDelete(LEGACY_BIO_META_KEY).catch(()=>{});
   }
 
 
@@ -2816,7 +2609,6 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   const lockOverlayEl = document.getElementById('lockOverlay');
   const lockTitleEl = document.getElementById('lockTitle');
   const lockSubtitleEl = document.getElementById('lockSubtitle');
-  const lockBioBtn = document.getElementById('lockBioBtn');
   const lockPass1El = document.getElementById('lockPass1');
   const lockPass2El = document.getElementById('lockPass2');
   const lockErrorEl = document.getElementById('lockError');
@@ -2887,7 +2679,6 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
       lockPass2El.style.display = opts.confirmField ? 'block' : 'none';
       lockCancelBtn.style.display = opts.cancelable ? 'inline-block' : 'none';
       lockSubmitBtn.textContent = opts.submitLabel || '确定';
-      lockBioBtn.style.display = opts.bioButton ? 'block' : 'none';
       activeLockInput = lockPass1El;
       setNumericEntryMode(true);
       lockFootnoteEl.innerHTML = '';
@@ -2904,7 +2695,6 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
         lockOverlayEl.classList.remove('open');
         lockSubmitBtn.removeEventListener('click', onSubmit);
         lockCancelBtn.removeEventListener('click', onCancel);
-        lockBioBtn.removeEventListener('click', onBio);
         lockPass1El.removeEventListener('keydown', onKey);
         lockPass2El.removeEventListener('keydown', onKey);
       }
@@ -2918,11 +2708,9 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
         resolve(v1);
       }
       function onCancel(){ cleanup(); resolve(null); }
-      function onBio(){ cleanup(); resolve('__BIO__'); }
       function onKey(e){ if(e.key === 'Enter'){ e.preventDefault(); onSubmit(); } }
       lockSubmitBtn.addEventListener('click', onSubmit);
       lockCancelBtn.addEventListener('click', onCancel);
-      lockBioBtn.addEventListener('click', onBio);
       lockPass1El.addEventListener('keydown', onKey);
       lockPass2El.addEventListener('keydown', onKey);
     });
@@ -2949,29 +2737,16 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
   }
 
   async function runUnlockFlow(){
-    const bioRec = idbDB ? await idbGet(BIO_META_KEY).catch(()=>null) : null;
-    const canBio = !!bioRec && await biometricPlatformAvailable();
-
-    if(canBio){
-      const ok = await tryBiometricUnlock();
-      if(ok) return;
-      // fell through — user cancelled, failed verification, or it's
-      // otherwise unavailable right now; drop to the password prompt below
-    }
+    // v35: drop any wrapped passcode left behind by the removed biometric feature
+    await purgeLegacyBiometricRecord();
 
     while(true){
       const pass = await showPassPrompt({
         title: '🔒 输入密码解锁',
         subtitle: '请输入访问密码以解密并查看你的行程记录。',
         confirmField: false, cancelable: false, submitLabel: '解锁',
-        showForgotLink: true, minLength: 1, bioButton: canBio
+        showForgotLink: true, minLength: 1
       });
-      if(pass === '__BIO__'){
-        const ok = await tryBiometricUnlock();
-        if(ok) return;
-        lockErrorEl.textContent = '指纹/Face ID 验证失败，请重试或输入密码。';
-        continue;
-      }
       if(pass === '__FORGOT__'){
         const wipe = await confirmResetAllData();
         if(wipe){
@@ -2990,46 +2765,6 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
 
   function flashStatusSafe(msg){ try{ flashStatus(msg); }catch(e){ console.log(msg); } }
 
-  async function refreshBioButtonLabel(){
-    const btn = document.getElementById('bioToggleBtn');
-    if(!btn) return;
-    const supported = await biometricPlatformAvailable();
-    if(!supported){
-      btn.textContent = '不支持';
-      btn.disabled = true;
-      return;
-    }
-    btn.disabled = false;
-    const rec = idbDB ? await idbGet(BIO_META_KEY).catch(()=>null) : null;
-    btn.textContent = rec ? '关闭' : '启用';
-    btn.dataset.enabled = rec ? '1' : '0';
-  }
-
-  document.getElementById('bioToggleBtn').addEventListener('click', async ()=>{
-    const btn = document.getElementById('bioToggleBtn');
-    if(btn.dataset.enabled === '1'){
-      if(confirm('确定要关闭指纹/Face ID 解锁吗？之后仍可以用密码解锁。')){
-        await disableBiometricUnlock();
-        await refreshBioButtonLabel();
-        flashStatus('已关闭指纹/Face ID 解锁');
-      }
-      return;
-    }
-    const pass = await showPassPrompt({
-      title: '启用指纹 / Face ID 解锁',
-      subtitle: '请先输入当前密码以确认身份，随后系统会请求你完成一次指纹或 Face ID 验证。',
-      cancelable: true, submitLabel: '下一步', minLength: 1
-    });
-    if(pass === null) return;
-    const ok = await verifyPasscode(pass);
-    if(!ok){ alert('密码不正确。'); return; }
-    const enabled = await enableBiometricUnlock(pass);
-    if(enabled){
-      flashStatus('已启用指纹/Face ID 解锁');
-      await refreshBioButtonLabel();
-    }
-  });
-
   document.getElementById('changePassBtn').addEventListener('click', async ()=>{
     const oldPass = await showPassPrompt({
       title: '更改密码', subtitle: '请输入当前密码以继续。',
@@ -3044,8 +2779,7 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     flashStatus('正在更新加密…');
     try{
       await changePasscode(oldPass, newPass);
-      flashStatus('密码已更新（指纹/Face ID 解锁已重置，如需请重新启用）');
-      await refreshBioButtonLabel();
+      flashStatus('密码已更新');
     }catch(e){
       alert(e && e.message === 'change-failed'
         ? '更改密码失败，原密码和数据保持不变，请重试。'
@@ -3368,7 +3102,6 @@ import * as pdfjsLib from './lib/pdf.min.mjs';
     await loadAll();
     resetIdleTimer();
     maybeShowWeakPasscodeNotice();
-    await refreshBioButtonLabel();
   })();
 })();
 

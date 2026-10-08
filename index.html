@@ -888,7 +888,6 @@
   <div class="lock-box">
     <div class="lock-title" id="lockTitle">🔒 输入密码解锁</div>
     <div class="lock-sub" id="lockSubtitle"></div>
-    <button type="button" class="btn" id="lockBioBtn" style="display:none; width:100%; margin-bottom:12px;">👆 使用指纹 / Face ID 解锁</button>
     <input type="password" id="lockPass1" autocomplete="off" placeholder="密码">
     <input type="password" id="lockPass2" autocomplete="off" placeholder="确认密码" style="display:none;">
     <div class="lock-error" id="lockError"></div>
@@ -953,17 +952,13 @@
       <button type="button" class="btn ghost sm" id="changePassBtn">更改密码</button>
     </div>
     <div class="set-row">
-      <div class="set-text"><div class="set-label">指纹 / Face ID 解锁</div></div>
-      <button type="button" class="btn ghost sm" id="bioToggleBtn">…</button>
-    </div>
-    <div class="set-row">
       <div class="set-text"><div class="set-label">安全与存储说明</div></div>
       <button type="button" class="btn ghost sm" id="infoNoteBtn">查看</button>
     </div>
     <div id="infoNoteBox" class="set-note" style="display:none;">
       <div id="storageModeNote" style="display:none;"></div>
       <div style="margin-top:8px;">
-        🔒 本工具所有数据均使用密码派生的密钥加密保存（PBKDF2 + AES-GCM）。密码仅保存在本次会话的内存中，不会被存储。指纹/Face ID 解锁只是密码的便捷入口（需要 iOS 18+ / 较新版 Android Chrome）——换设备或清除浏览器数据后，仍需用密码解锁。
+        🔒 本工具所有数据均使用密码派生的密钥加密保存（PBKDF2 + AES-GCM）。密码仅保存在本次会话的内存中，不会被存储。换设备或清除浏览器数据后，仍需用密码解锁。
       </div>
     </div>
     <div class="save-status set-status" id="saveStatus"></div>

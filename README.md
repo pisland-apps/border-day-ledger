@@ -256,6 +256,12 @@ shown only while 导出加密 is off. `#saveStatus` is hidden while empty.
   form field. Inline transform/opacity are cleared in `settle()` so the CSS
   transition finishes the motion.
 
+## v35: biometric (fingerprint / Face ID) unlock removed
+
+Why: unlock needed the WebAuthn PRF extension, which the owner's Samsung and Xiaomi devices do not provide, so on those phones the button could only show an "unsupported" alert. The passcode already encrypts everything (PBKDF2 + AES-GCM); biometric was only a shortcut to it, so no protection is lost.
+
+Removed: the lock-screen 👆 button, the 指纹 / Face ID 解锁 row in the settings drawer, all `enable/disable/tryBiometricUnlock` code, the biometric calls in Change Passcode, and the "iOS 18+ / newer Android Chrome" sentence in the security note. Added: `purgeLegacyBiometricRecord()` runs at every unlock screen and deletes the old `border-ledger:biometric-unlock` record (a passcode wrapped with a PRF key) if an earlier build left one. A leftover passkey in the phone's own credential manager is harmless and can be deleted there. Passcode unlock, auto-lock and backups are unchanged. `APP_VERSION` / `CACHE_NAME` → v35.
+
 ## v34: scanner PDFs still blank after v33 — JS fallback decoders added
 
 Symptom: after v33 the scanner PDFs could still open blank on a host that sends the CSP as an HTTP header (as `_headers` does). Cause: a CSP delivered as a header also applies to pdf.js's worker (a `<meta>` CSP does not), and the worker may not compile `.wasm` unless `script-src` has `'wasm-unsafe-eval'`; the v33 `<meta>` keyword alone does not cover that. pdf.js then looks for a plain-JavaScript copy of the decoder in the same folder, which v33 had not shipped. Found while fixing the same problem in the companion Shelfmark app (reproduced in headless Chromium with the CSP as a header: strict CSP + `.wasm` only → blank pages; + the fallback files → all pages show).
@@ -335,5 +341,5 @@ Decisions: minimum passcode length is **6**; **no unlock throttling** (skipped o
 
 ## Current versions
 
-- `APP_VERSION`: `v34` (`app.js`)
-- `CACHE_NAME`: `border-day-ledger-cache-v34` (`sw.js`)
+- `APP_VERSION`: `v35` (`app.js`)
+- `CACHE_NAME`: `border-day-ledger-cache-v35` (`sw.js`)
